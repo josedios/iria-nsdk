@@ -10,6 +10,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDividerModule } from '@angular/material/divider';
 import { FlatTreeControl } from '@angular/cdk/tree';
 import { MatTreeFlatDataSource, MatTreeFlattener } from '@angular/material/tree';
 
@@ -78,245 +79,11 @@ interface AnalysisData {
     MatChipsModule,
     MatProgressSpinnerModule,
     MatMenuModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatDividerModule
   ],
-  template: `
-    <div class="modules-container">
-      <div class="modules-header">
-        <h1>Explorador de Módulos</h1>
-        <div class="header-actions">
-          <button mat-raised-button color="primary" (click)="refreshModules()">
-            <mat-icon>refresh</mat-icon>
-            Actualizar
-          </button>
-          <button mat-raised-button color="accent" (click)="vectorizeCode()">
-            <mat-icon>upload</mat-icon>
-            Vectorizar Código
-          </button>
-        </div>
-      </div>
-      
-      <div class="modules-content">
-        <mat-card class="modules-tree-card">
-          <mat-card-header>
-            <mat-card-title>Árbol de Módulos y Pantallas</mat-card-title>
-            <mat-card-subtitle>{{ getTreeStats() }}</mat-card-subtitle>
-          </mat-card-header>
-          <mat-card-content>
-            <mat-tree [dataSource]="dataSource" [treeControl]="treeControl">
-              <mat-tree-node *matTreeNodeDef="let node" matTreeNodePadding>
-                <div class="tree-node">
-                  <div class="node-content">
-                    <mat-icon class="node-icon" [class]="'node-type-' + node.type">
-                      {{ node.type === 'module' ? 'folder' : 'visibility' }}
-                    </mat-icon>
-                    <span class="node-name">{{ node.name }}</span>
-                    <mat-chip class="status-chip" [class]="'status-' + node.status">
-                      {{ getStatusLabel(node.status) }}
-                    </mat-chip>
-                  </div>
-                  
-                  <div class="node-actions" *ngIf="node.type === 'screen'">
-                    <button mat-icon-button 
-                            [matTooltip]="'Analizar pantalla'" 
-                            (click)="analyzeScreen(node)"
-                            [disabled]="node.status === 'analyzing'">
-                      <mat-icon>analytics</mat-icon>
-                    </button>
-                    <button mat-icon-button 
-                            [matTooltip]="'Ver análisis'" 
-                            (click)="viewAnalysis(node)"
-                            [disabled]="node.status === 'pending'">
-                      <mat-icon>visibility</mat-icon>
-                    </button>
-                    <button mat-icon-button 
-                            [matTooltip]="'Generar código'" 
-                            (click)="generateCode(node)"
-                            [disabled]="node.status !== 'analyzed'">
-                      <mat-icon>code</mat-icon>
-                    </button>
-                    <button mat-icon-button 
-                            [matMenuTriggerFor]="menu" 
-                            [matTooltip]="'Más opciones'">
-                      <mat-icon>more_vert</mat-icon>
-                    </button>
-                    
-                    <mat-menu #menu="matMenu">
-                      <button mat-menu-item (click)="assignDeveloper(node)">
-                        <mat-icon>person</mat-icon>
-                        Asignar Desarrollador
-                      </button>
-                      <button mat-menu-item (click)="viewCode(node)">
-                        <mat-icon>code</mat-icon>
-                        Ver Código SCR
-                      </button>
-                      <button mat-menu-item (click)="exportAnalysis(node)">
-                        <mat-icon>download</mat-icon>
-                        Exportar Análisis
-                      </button>
-                    </mat-menu>
-                  </div>
-                </div>
-              </mat-tree-node>
-              
-              <mat-tree-node *matTreeNodeDef="let node;when: hasChild" matTreeNodePadding>
-                <div class="tree-node">
-                  <div class="node-content">
-                    <button mat-icon-button matTreeNodeToggle
-                            [attr.aria-label]="'Toggle ' + node.name">
-                      <mat-icon class="mat-icon-rtl-mirror">
-                        {{ treeControl.isExpanded(node) ? 'expand_more' : 'chevron_right' }}
-                      </mat-icon>
-                    </button>
-                    <mat-icon class="node-icon" [class]="'node-type-' + node.type">
-                      {{ node.type === 'module' ? 'folder' : 'visibility' }}
-                    </mat-icon>
-                    <span class="node-name">{{ node.name }}</span>
-                    <mat-chip class="status-chip" [class]="'status-' + node.status">
-                      {{ getStatusLabel(node.status) }}
-                    </mat-chip>
-                  </div>
-                  
-                  <div class="node-stats" *ngIf="node.type === 'module'">
-                    <span class="stat-item">{{ getModuleScreenCount(node) }} pantallas</span>
-                    <span class="stat-item">{{ getModuleProgress(node) }}% completado</span>
-                  </div>
-                </div>
-              </mat-tree-node>
-            </mat-tree>
-          </mat-card-content>
-        </mat-card>
-      </div>
-    </div>
-  `,
-  styles: [`
-    .modules-container {
-      padding: 20px;
-      height: 100%;
-    }
-    
-    .modules-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 20px;
-    }
-    
-    .modules-header h1 {
-      margin: 0;
-      color: #333;
-      font-weight: 300;
-    }
-    
-    .header-actions {
-      display: flex;
-      gap: 10px;
-    }
-    
-    .modules-content {
-      height: calc(100vh - 140px);
-    }
-    
-    .modules-tree-card {
-      height: 100%;
-    }
-    
-    .tree-node {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid #f0f0f0;
-    }
-    
-    .node-content {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 1;
-    }
-    
-    .node-icon {
-      font-size: 20px;
-    }
-    
-    .node-icon.node-type-module {
-      color: #2196F3;
-    }
-    
-    .node-icon.node-type-screen {
-      color: #4CAF50;
-    }
-    
-    .node-name {
-      font-weight: 500;
-    }
-    
-    .status-chip {
-      font-size: 11px;
-      height: 24px;
-      border-radius: 12px;
-    }
-    
-    .status-chip.status-pending {
-      background-color: #f5f5f5;
-      color: #666;
-    }
-    
-    .status-chip.status-analyzing {
-      background-color: #FFF3E0;
-      color: #F57C00;
-    }
-    
-    .status-chip.status-analyzed {
-      background-color: #E8F5E8;
-      color: #2E7D32;
-    }
-    
-    .status-chip.status-generated {
-      background-color: #E3F2FD;
-      color: #1976D2;
-    }
-    
-    .status-chip.status-error {
-      background-color: #FFEBEE;
-      color: #C62828;
-    }
-    
-    .node-actions {
-      display: flex;
-      gap: 4px;
-    }
-    
-    .node-stats {
-      display: flex;
-      gap: 15px;
-      font-size: 12px;
-      color: #666;
-    }
-    
-    .stat-item {
-      background-color: #f0f0f0;
-      padding: 2px 8px;
-      border-radius: 10px;
-    }
-    
-    @media (max-width: 768px) {
-      .modules-header {
-        flex-direction: column;
-        gap: 10px;
-        align-items: flex-start;
-      }
-      
-      .header-actions {
-        width: 100%;
-      }
-      
-      .node-actions {
-        flex-direction: column;
-      }
-    }
-  `]
+  templateUrl: './modules.component.html',
+  styleUrls: ['./modules.component.scss']
 })
 export class ModulesComponent implements OnInit {
   
@@ -407,8 +174,7 @@ export class ModulesComponent implements OnInit {
   }
 
   ngOnInit() {
-    // Expandir todos los nodos por defecto
-    this.treeControl.expandAll();
+    // Inicialización adicional si es necesaria
   }
 
   hasChild = (_: number, node: FlatNode) => node.expandable;
@@ -417,8 +183,8 @@ export class ModulesComponent implements OnInit {
     const labels = {
       'pending': 'Pendiente',
       'analyzing': 'Analizando',
-      'analyzed': 'Analizada',
-      'generated': 'Generada',
+      'analyzed': 'Analizado',
+      'generated': 'Generado',
       'error': 'Error'
     };
     return labels[status as keyof typeof labels] || status;
@@ -428,93 +194,93 @@ export class ModulesComponent implements OnInit {
     const totalScreens = this.countScreens(this.TREE_DATA);
     const analyzedScreens = this.countScreensByStatus(this.TREE_DATA, 'analyzed');
     const generatedScreens = this.countScreensByStatus(this.TREE_DATA, 'generated');
-    
-    return `${totalScreens} pantallas total • ${analyzedScreens} analizadas • ${generatedScreens} generadas`;
+    return `${totalScreens} pantallas totales, ${analyzedScreens} analizadas, ${generatedScreens} generadas`;
   }
 
   countScreens(nodes: ModuleNode[]): number {
     return nodes.reduce((count, node) => {
-      if (node.type === 'screen') {
-        return count + 1;
-      }
-      return count + (node.children ? this.countScreens(node.children) : 0);
+      if (node.type === 'screen') count++;
+      if (node.children) count += this.countScreens(node.children);
+      return count;
     }, 0);
   }
 
   countScreensByStatus(nodes: ModuleNode[], status: string): number {
     return nodes.reduce((count, node) => {
-      if (node.type === 'screen' && node.status === status) {
-        return count + 1;
-      }
-      return count + (node.children ? this.countScreensByStatus(node.children, status) : 0);
+      if (node.type === 'screen' && node.status === status) count++;
+      if (node.children) count += this.countScreensByStatus(node.children, status);
+      return count;
     }, 0);
   }
 
   getModuleScreenCount(node: FlatNode): number {
-    // Implementar lógica para contar pantallas en un módulo
-    return 2; // Mock
+    const moduleNode = this.TREE_DATA.find(n => n.name === node.name);
+    return moduleNode?.children?.length || 0;
   }
 
   getModuleProgress(node: FlatNode): number {
-    // Implementar lógica para calcular progreso
-    return 50; // Mock
+    const moduleNode = this.TREE_DATA.find(n => n.name === node.name);
+    if (!moduleNode?.children) return 0;
+    
+    const totalScreens = moduleNode.children.length;
+    const completedScreens = moduleNode.children.filter(screen => 
+      screen.status === 'generated' || screen.status === 'analyzed'
+    ).length;
+    
+    return Math.round((completedScreens / totalScreens) * 100);
   }
 
   refreshModules() {
-    console.log('Refreshing modules...');
-    // Implementar lógica de actualización
+    console.log('Actualizando módulos...');
+    // Aquí iría la lógica para actualizar los módulos
   }
 
   vectorizeCode() {
-    console.log('Vectorizing code...');
-    // Implementar lógica de vectorización
+    console.log('Vectorizando código...');
+    // Aquí iría la lógica para vectorizar el código
   }
 
   analyzeScreen(node: FlatNode) {
-    console.log('Analyzing screen:', node.name);
-    // Implementar lógica de análisis
-    // Actualizar estado del nodo
+    console.log(`Analizando pantalla: ${node.name}`);
+    node.status = 'analyzing';
+    // Simular análisis
+    setTimeout(() => {
+      node.status = 'analyzed';
+    }, 2000);
   }
 
   viewAnalysis(node: FlatNode) {
-    console.log('Viewing analysis for:', node.name);
+    console.log(`Viendo análisis de: ${node.name}`);
     this.openAnalysisModal(node);
   }
 
   generateCode(node: FlatNode) {
-    console.log('Generating code for:', node.name);
-    // Implementar lógica de generación
+    console.log(`Generando código para: ${node.name}`);
+    node.status = 'generated';
   }
 
   assignDeveloper(node: FlatNode) {
-    console.log('Assigning developer to:', node.name);
-    // Implementar lógica de asignación
+    console.log(`Asignando desarrollador a: ${node.name}`);
   }
 
   viewCode(node: FlatNode) {
-    console.log('Viewing SCR code for:', node.name);
-    // Implementar modal para mostrar código SCR
+    console.log(`Viendo código de: ${node.name}`);
   }
 
   exportAnalysis(node: FlatNode) {
-    console.log('Exporting analysis for:', node.name);
-    // Implementar lógica de exportación
+    console.log(`Exportando análisis de: ${node.name}`);
   }
 
   openAnalysisModal(node: FlatNode) {
-    const dialogRef = this.dialog.open(AnalysisModalComponent, {
+    const analysisData = this.getMockAnalysisData();
+    
+    this.dialog.open(AnalysisModalComponent, {
       width: '90vw',
-      maxWidth: '1200px',
-      height: '80vh',
+      height: '90vh',
       data: {
-        screenName: node.name,
-        screenId: node.id,
-        analysisData: this.getMockAnalysisData()
+        node: node,
+        analysis: analysisData
       }
-    });
-
-    dialogRef.afterClosed().subscribe(result => {
-      console.log('Analysis modal closed:', result);
     });
   }
 
@@ -522,270 +288,268 @@ export class ModulesComponent implements OnInit {
     return {
       frontend: {
         fields: [
-          { name: 'numeroFactura', type: 'text', required: true, validation: 'numeric' },
-          { name: 'fechaFactura', type: 'date', required: true },
-          { name: 'clienteId', type: 'select', required: true, datasource: 'clientes' }
+          { name: 'codigo', type: 'string', required: true, validation: 'maxLength:10' },
+          { name: 'descripcion', type: 'string', required: true, validation: 'maxLength:100' },
+          { name: 'precio', type: 'number', required: true, validation: 'min:0' },
+          { name: 'stock', type: 'number', required: false, validation: 'min:0' }
         ],
         validations: [
-          { field: 'numeroFactura', rule: 'unique', message: 'El número de factura debe ser único' },
-          { field: 'fechaFactura', rule: 'dateRange', message: 'La fecha debe estar en el rango permitido' }
+          { field: 'codigo', type: 'required', message: 'El código es obligatorio' },
+          { field: 'codigo', type: 'maxLength', value: 10, message: 'Máximo 10 caracteres' },
+          { field: 'precio', type: 'min', value: 0, message: 'El precio debe ser mayor a 0' }
         ],
-        dependencies: ['ClienteService', 'FacturacionService', 'ValidationService'],
+        dependencies: ['@angular/forms', '@angular/material'],
         buttons: [
-          { name: 'Guardar', action: 'save', validation: true },
-          { name: 'Cancelar', action: 'cancel' },
-          { name: 'Imprimir', action: 'print', condition: 'saved' }
+          { text: 'Guardar', action: 'save', type: 'primary' },
+          { text: 'Cancelar', action: 'cancel', type: 'secondary' },
+          { text: 'Limpiar', action: 'clear', type: 'secondary' }
         ],
-        presentationLogic: 'La pantalla maneja la creación y edición de facturas con validaciones en tiempo real',
+        presentationLogic: 'Formulario de producto con validaciones en tiempo real y botones de acción',
         uiComponents: [
-          { type: 'FormGroup', name: 'facturaForm' },
-          { type: 'DataTable', name: 'detalleFactura' },
-          { type: 'Modal', name: 'clienteSelector' }
+          { type: 'mat-form-field', component: 'MatInputModule' },
+          { type: 'mat-button', component: 'MatButtonModule' },
+          { type: 'mat-card', component: 'MatCardModule' }
         ]
       },
       backend: {
-        businessLogic: 'Gestión completa del ciclo de vida de facturas incluyendo validaciones de negocio',
+        businessLogic: 'Validación de negocio para productos: verificar código único, calcular impuestos, validar stock',
         sqlQueries: [
-          { type: 'INSERT', table: 'facturas', description: 'Inserción de nueva factura' },
-          { type: 'SELECT', table: 'clientes', description: 'Obtención de datos del cliente' },
-          { type: 'UPDATE', table: 'inventario', description: 'Actualización de stock' }
+          { type: 'SELECT', query: 'SELECT * FROM productos WHERE codigo = ?', purpose: 'Verificar existencia' },
+          { type: 'INSERT', query: 'INSERT INTO productos (codigo, descripcion, precio, stock) VALUES (?, ?, ?, ?)', purpose: 'Crear producto' },
+          { type: 'UPDATE', query: 'UPDATE productos SET descripcion = ?, precio = ?, stock = ? WHERE codigo = ?', purpose: 'Actualizar producto' }
         ],
         validations: [
-          { type: 'business', rule: 'clienteActivo', message: 'El cliente debe estar activo' },
-          { type: 'business', rule: 'stockDisponible', message: 'Verificar stock disponible' }
+          { field: 'codigo', type: 'unique', table: 'productos', column: 'codigo' },
+          { field: 'precio', type: 'range', min: 0, max: 999999.99 },
+          { field: 'stock', type: 'range', min: 0, max: 999999 }
         ],
         externalCalls: [
-          { service: 'SunatService', method: 'validarRuc', async: true },
-          { service: 'EmailService', method: 'enviarFactura', async: true }
+          { service: 'TaxService', method: 'calculateTax', async: true, purpose: 'Calcular impuestos' },
+          { service: 'InventoryService', method: 'checkStock', async: false, purpose: 'Verificar stock disponible' }
         ],
         dataTransformations: [
-          { from: 'NSDK_FACTURA', to: 'FacturaDTO', description: 'Transformación de entidad legacy' }
+          { from: 'string', to: 'uppercase', field: 'codigo' },
+          { from: 'number', to: 'currency', field: 'precio', format: 'USD' },
+          { from: 'date', to: 'string', field: 'fecha_creacion', format: 'YYYY-MM-DD' }
         ],
-        dependencies: ['FacturaRepository', 'ClienteService', 'InventarioService', 'SunatService']
+        dependencies: ['sqlalchemy', 'pydantic', 'fastapi']
       },
       api: {
         endpoints: [
-          { method: 'POST', path: '/api/facturas', description: 'Crear nueva factura' },
-          { method: 'GET', path: '/api/facturas/{id}', description: 'Obtener factura por ID' },
-          { method: 'PUT', path: '/api/facturas/{id}', description: 'Actualizar factura' }
+          { method: 'GET', path: '/api/productos', description: 'Listar productos' },
+          { method: 'GET', path: '/api/productos/{id}', description: 'Obtener producto por ID' },
+          { method: 'POST', path: '/api/productos', description: 'Crear producto' },
+          { method: 'PUT', path: '/api/productos/{id}', description: 'Actualizar producto' },
+          { method: 'DELETE', path: '/api/productos/{id}', description: 'Eliminar producto' }
         ],
         openapiSpec: `
-openapi: 3.0.0
-info:
-  title: Facturación API
-  version: 1.0.0
-paths:
-  /api/facturas:
-    post:
-      summary: Crear nueva factura
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FacturaCreate'
-      responses:
-        '201':
-          description: Factura creada exitosamente
-components:
-  schemas:
-    FacturaCreate:
-      type: object
-      properties:
-        numeroFactura:
-          type: string
-        fechaFactura:
-          type: string
-          format: date
-        clienteId:
-          type: integer
+          openapi: 3.0.0
+          info:
+            title: API de Productos
+            version: 1.0.0
+          paths:
+            /api/productos:
+              get:
+                summary: Listar productos
+                responses:
+                  '200':
+                    description: Lista de productos
+              post:
+                summary: Crear producto
+                requestBody:
+                  required: true
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Producto'
         `,
         securityRequirements: [
-          { type: 'JWT', scope: 'facturacion:write' },
-          { type: 'RBAC', roles: ['FACTURADOR', 'ADMIN'] }
+          { type: 'JWT', scope: 'productos:read' },
+          { type: 'JWT', scope: 'productos:write' }
         ],
         dataModels: [
-          { name: 'FacturaDTO', fields: ['id', 'numeroFactura', 'fechaFactura', 'clienteId', 'total'] },
-          { name: 'DetalleFacturaDTO', fields: ['id', 'facturaId', 'productoId', 'cantidad', 'precio'] }
+          { name: 'Producto', fields: ['id', 'codigo', 'descripcion', 'precio', 'stock', 'fecha_creacion'] },
+          { name: 'ProductoCreate', fields: ['codigo', 'descripcion', 'precio', 'stock'] },
+          { name: 'ProductoUpdate', fields: ['descripcion', 'precio', 'stock'] }
         ],
         errorHandling: [
-          { code: 'FACT001', message: 'Número de factura duplicado' },
-          { code: 'FACT002', message: 'Cliente no encontrado' },
-          { code: 'FACT003', message: 'Stock insuficiente' }
+          { code: 400, message: 'Datos inválidos', type: 'ValidationError' },
+          { code: 404, message: 'Producto no encontrado', type: 'NotFoundError' },
+          { code: 409, message: 'Código de producto duplicado', type: 'ConflictError' },
+          { code: 500, message: 'Error interno del servidor', type: 'InternalServerError' }
         ]
       }
     };
   }
 }
 
+// Componente del modal de análisis
+import { MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { Inject } from '@angular/core';
+
 @Component({
   selector: 'app-analysis-modal',
   standalone: true,
   imports: [
     CommonModule,
-    MatDialogModule,
     MatTabsModule,
+    MatCardModule,
+    MatChipsModule,
     MatButtonModule,
     MatIconModule,
-    MatCardModule,
-    MatChipsModule
+    MatDividerModule
   ],
   template: `
     <div class="analysis-modal">
-      <div mat-dialog-title class="modal-header">
-        <h2>Análisis de Pantalla: {{ data.screenName }}</h2>
-        <button mat-icon-button mat-dialog-close>
+      <div class="modal-header">
+        <h2>Análisis de {{ data.node.name }}</h2>
+        <button mat-icon-button (click)="dialogRef.close()">
           <mat-icon>close</mat-icon>
         </button>
       </div>
       
-      <div mat-dialog-content class="modal-content">
+      <div class="modal-content">
         <mat-tab-group>
+          <!-- Frontend Tab -->
           <mat-tab label="Frontend">
             <div class="tab-content">
-              <div class="analysis-section">
-                <h3>Campos</h3>
-                <div class="fields-grid">
-                  <mat-card *ngFor="let field of data.analysisData.frontend.fields" class="field-card">
-                    <mat-card-content>
-                      <div class="field-header">
-                        <strong>{{ field.name }}</strong>
-                        <mat-chip [selected]="field.required" color="primary">
-                          {{ field.type }}
-                        </mat-chip>
-                      </div>
-                      <p *ngIf="field.validation">Validación: {{ field.validation }}</p>
-                      <p *ngIf="field.datasource">Origen: {{ field.datasource }}</p>
-                    </mat-card-content>
-                  </mat-card>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Campos del Formulario</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="field-item" *ngFor="let field of data.analysis.frontend.fields">
+                    <div class="field-header">
+                      <strong>{{ field.name }}</strong>
+                      <mat-chip [color]="field.required ? 'primary' : 'default'">
+                        {{ field.type }}
+                      </mat-chip>
+                    </div>
+                    <p class="field-validation">{{ field.validation }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
               
-              <div class="analysis-section">
-                <h3>Validaciones</h3>
-                <div class="validations-list">
-                  <mat-card *ngFor="let validation of data.analysisData.frontend.validations" class="validation-card">
-                    <mat-card-content>
-                      <div class="validation-info">
-                        <strong>{{ validation.field }}</strong>
-                        <mat-chip>{{ validation.rule }}</mat-chip>
-                      </div>
-                      <p>{{ validation.message }}</p>
-                    </mat-card-content>
-                  </mat-card>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Validaciones</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="validation-item" *ngFor="let validation of data.analysis.frontend.validations">
+                    <mat-chip color="warn">{{ validation.field }}</mat-chip>
+                    <span>{{ validation.message }}</span>
+                  </div>
+                </mat-card-content>
+              </mat-card>
               
-              <div class="analysis-section">
-                <h3>Dependencias</h3>
-                <div class="dependencies-chips">
-                  <mat-chip *ngFor="let dep of data.analysisData.frontend.dependencies" color="accent">
-                    {{ dep }}
-                  </mat-chip>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Botones</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="button-item" *ngFor="let button of data.analysis.frontend.buttons">
+                    <mat-chip [color]="button.type === 'primary' ? 'primary' : 'default'">
+                      {{ button.text }}
+                    </mat-chip>
+                    <span>{{ button.action }}</span>
+                  </div>
+                </mat-card-content>
+              </mat-card>
             </div>
           </mat-tab>
           
+          <!-- Backend Tab -->
           <mat-tab label="Backend">
             <div class="tab-content">
-              <div class="analysis-section">
-                <h3>Lógica de Negocio</h3>
-                <mat-card>
-                  <mat-card-content>
-                    <p>{{ data.analysisData.backend.businessLogic }}</p>
-                  </mat-card-content>
-                </mat-card>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Lógica de Negocio</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p>{{ data.analysis.backend.businessLogic }}</p>
+                </mat-card-content>
+              </mat-card>
               
-              <div class="analysis-section">
-                <h3>Consultas SQL</h3>
-                <div class="sql-queries">
-                  <mat-card *ngFor="let query of data.analysisData.backend.sqlQueries" class="sql-card">
-                    <mat-card-content>
-                      <div class="sql-header">
-                        <mat-chip [color]="getSqlTypeColor(query.type)">{{ query.type }}</mat-chip>
-                        <strong>{{ query.table }}</strong>
-                      </div>
-                      <p>{{ query.description }}</p>
-                    </mat-card-content>
-                  </mat-card>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Consultas SQL</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="sql-item" *ngFor="let query of data.analysis.backend.sqlQueries">
+                    <div class="query-header">
+                      <mat-chip [color]="getSqlTypeColor(query.type)">{{ query.type }}</mat-chip>
+                      <span>{{ query.purpose }}</span>
+                    </div>
+                    <pre class="query-sql">{{ query.query }}</pre>
+                  </div>
+                </mat-card-content>
+              </mat-card>
               
-              <div class="analysis-section">
-                <h3>Llamadas Externas</h3>
-                <div class="external-calls">
-                  <mat-card *ngFor="let call of data.analysisData.backend.externalCalls" class="call-card">
-                    <mat-card-content>
-                      <div class="call-header">
-                        <strong>{{ call.service }}</strong>
-                        <mat-chip [selected]="call.async" color="warn">
-                          {{ call.async ? 'Async' : 'Sync' }}
-                        </mat-chip>
-                      </div>
-                      <p>{{ call.method }}</p>
-                    </mat-card-content>
-                  </mat-card>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Llamadas Externas</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="call-item" *ngFor="let call of data.analysis.backend.externalCalls">
+                    <div class="call-header">
+                      <strong>{{ call.service }}</strong>
+                      <mat-chip [color]="call.async ? 'warn' : 'default'">
+                        {{ call.async ? 'Async' : 'Sync' }}
+                      </mat-chip>
+                    </div>
+                    <p>{{ call.method }} - {{ call.purpose }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
             </div>
           </mat-tab>
           
+          <!-- API Tab -->
           <mat-tab label="API">
             <div class="tab-content">
-              <div class="analysis-section">
-                <h3>Endpoints</h3>
-                <div class="endpoints-list">
-                  <mat-card *ngFor="let endpoint of data.analysisData.api.endpoints" class="endpoint-card">
-                    <mat-card-content>
-                      <div class="endpoint-header">
-                        <mat-chip [color]="getMethodColor(endpoint.method)">{{ endpoint.method }}</mat-chip>
-                        <code>{{ endpoint.path }}</code>
-                      </div>
-                      <p>{{ endpoint.description }}</p>
-                    </mat-card-content>
-                  </mat-card>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Endpoints</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="endpoint-item" *ngFor="let endpoint of data.analysis.api.endpoints">
+                    <div class="endpoint-header">
+                      <mat-chip [color]="getMethodColor(endpoint.method)">{{ endpoint.method }}</mat-chip>
+                      <code>{{ endpoint.path }}</code>
+                    </div>
+                    <p>{{ endpoint.description }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
               
-              <div class="analysis-section">
-                <h3>Especificación OpenAPI</h3>
-                <mat-card>
-                  <mat-card-content>
-                    <pre><code>{{ data.analysisData.api.openapiSpec }}</code></pre>
-                  </mat-card-content>
-                </mat-card>
-              </div>
-              
-              <div class="analysis-section">
-                <h3>Modelos de Datos</h3>
-                <div class="data-models">
-                  <mat-card *ngFor="let model of data.analysisData.api.dataModels" class="model-card">
-                    <mat-card-content>
-                      <h4>{{ model.name }}</h4>
-                      <div class="model-fields">
-                        <mat-chip *ngFor="let field of model.fields">{{ field }}</mat-chip>
-                      </div>
-                    </mat-card-content>
-                  </mat-card>
-                </div>
-              </div>
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Modelos de Datos</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="model-item" *ngFor="let model of data.analysis.api.dataModels">
+                    <h4>{{ model.name }}</h4>
+                    <div class="model-fields">
+                      <mat-chip *ngFor="let field of model.fields" color="accent">{{ field }}</mat-chip>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
             </div>
           </mat-tab>
         </mat-tab-group>
       </div>
       
-      <div mat-dialog-actions class="modal-actions">
-        <button mat-button mat-dialog-close>Cerrar</button>
+      <div class="modal-actions">
         <button mat-raised-button color="primary" (click)="generateCode()">
           <mat-icon>code</mat-icon>
           Generar Código
         </button>
-        <button mat-raised-button color="accent" (click)="exportAnalysis()">
+        <button mat-raised-button (click)="exportAnalysis()">
           <mat-icon>download</mat-icon>
-          Exportar
+          Exportar Análisis
         </button>
+        <button mat-button (click)="dialogRef.close()">Cerrar</button>
       </div>
     </div>
   `,
@@ -800,153 +564,67 @@ components:
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 0 24px;
+      padding: 20px;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .modal-header h2 {
+      margin: 0;
     }
     
     .modal-content {
       flex: 1;
       overflow: auto;
-    }
-    
-    .tab-content {
       padding: 20px;
     }
     
-    .analysis-section {
-      margin-bottom: 30px;
+    .tab-content {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
     }
     
-    .analysis-section h3 {
+    .field-item, .validation-item, .button-item, .sql-item, .call-item, .endpoint-item, .model-item {
       margin-bottom: 15px;
-      color: #333;
+      padding: 10px;
+      border: 1px solid #eee;
+      border-radius: 4px;
     }
     
-    .fields-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 15px;
-    }
-    
-    .field-card {
-      border-left: 4px solid #2196F3;
-    }
-    
-    .field-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    
-    .validations-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    
-    .validation-card {
-      border-left: 4px solid #FF9800;
-    }
-    
-    .validation-info {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    
-    .dependencies-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    
-    .sql-queries {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    
-    .sql-card {
-      border-left: 4px solid #4CAF50;
-    }
-    
-    .sql-header {
+    .field-header, .query-header, .call-header, .endpoint-header {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 10px;
+      margin-bottom: 5px;
     }
     
-    .external-calls {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    .field-validation {
+      margin: 5px 0 0 0;
+      color: #666;
+      font-size: 12px;
     }
     
-    .call-card {
-      border-left: 4px solid #9C27B0;
-    }
-    
-    .call-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    
-    .endpoints-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    
-    .endpoint-card {
-      border-left: 4px solid #FF5722;
-    }
-    
-    .endpoint-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    
-    .data-models {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 15px;
-    }
-    
-    .model-card {
-      border-left: 4px solid #607D8B;
+    .query-sql {
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      margin: 10px 0 0 0;
     }
     
     .model-fields {
       display: flex;
       flex-wrap: wrap;
       gap: 5px;
+      margin-top: 10px;
     }
     
     .modal-actions {
-      padding: 16px 24px;
       display: flex;
-      justify-content: flex-end;
       gap: 10px;
-    }
-    
-    pre {
-      background-color: #f5f5f5;
-      padding: 15px;
-      border-radius: 4px;
-      overflow-x: auto;
-    }
-    
-    code {
-      font-family: 'Courier New', monospace;
-      background-color: #f0f0f0;
-      padding: 2px 4px;
-      border-radius: 3px;
+      padding: 20px;
+      border-top: 1px solid #eee;
+      justify-content: flex-end;
     }
   `]
 })
@@ -963,7 +641,7 @@ export class AnalysisModalComponent {
       'UPDATE': 'warn',
       'DELETE': 'warn'
     };
-    return colors[type as keyof typeof colors] || 'primary';
+    return colors[type as keyof typeof colors] || 'default';
   }
 
   getMethodColor(method: string): string {
@@ -973,22 +651,14 @@ export class AnalysisModalComponent {
       'PUT': 'warn',
       'DELETE': 'warn'
     };
-    return colors[method as keyof typeof colors] || 'primary';
+    return colors[method as keyof typeof colors] || 'default';
   }
 
   generateCode() {
-    console.log('Generating code from analysis...');
-    // Implementar lógica de generación de código
-    this.dialogRef.close('generate');
+    console.log('Generando código...');
   }
 
   exportAnalysis() {
-    console.log('Exporting analysis...');
-    // Implementar lógica de exportación
-    this.dialogRef.close('export');
+    console.log('Exportando análisis...');
   }
 }
-
-// Necesitamos estas importaciones para el modal
-import { MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
-import { Inject } from '@angular/core';

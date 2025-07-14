@@ -1,0 +1,73 @@
+<div class="login-container">
+  <div class="login-background">
+    <div class="background-pattern"></div>
+  </div>
+  
+  <div class="login-content">
+    <mat-card class="login-card">
+      <mat-card-header class="login-header">
+        <div class="brand">
+          <mat-icon class="brand-icon">code</mat-icon>
+          <h1>Iria - NSDK Migration Platform</h1>
+        </div>
+        <p class="subtitle">Migración NSDK hacia tecnologías modernas</p>
+      </mat-card-header>
+      
+      <mat-card-content class="login-form">
+        <div class="poc-notice">
+          <mat-icon>info</mat-icon>
+          <div class="notice-content">
+            <h3>Versión PoC - Acceso Libre</h3>
+            <p>Esta es una versión de demostración. Haz clic en "Acceder" para continuar.</p>
+          </div>
+        </div>
+        
+        <form class="form">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Usuario (Opcional)</mat-label>
+            <input matInput [(ngModel)]="username" name="username" placeholder="desarrollador@empresa.com">
+            <mat-icon matSuffix>person</mat-icon>
+          </mat-form-field>
+          
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>Contraseña (Opcional)</mat-label>
+            <input matInput type="password" [(ngModel)]="password" name="password" placeholder="••••••••">
+            <mat-icon matSuffix>lock</mat-icon>
+          </mat-form-field>
+          
+          <button mat-raised-button color="primary" class="login-button" (click)="login()">
+            <mat-icon>login</mat-icon>
+            Acceder al Sistema
+          </button>
+          
+          <button mat-button class="demo-button" (click)="loginAsDemo()">
+            <mat-icon>play_arrow</mat-icon>
+            Continuar como Demo
+          </button>
+        </form>
+      </mat-card-content>
+      
+      <mat-card-footer class="login-footer">
+        <div class="features">
+          <div class="feature">
+            <mat-icon>analytics</mat-icon>
+            <span>Análisis con IA</span>
+          </div>
+          <div class="feature">
+            <mat-icon>code</mat-icon>
+            <span>Generación Automática</span>
+          </div>
+          <div class="feature">
+            <mat-icon>git_commit</mat-icon>
+            <span>Integración Git</span>
+          </div>
+        </div>
+        
+        <div class="version-info">
+          <span>Iria - NSDK Migration Platform v1.0.0</span>
+          <span>Construido con ❤️ para modernizar NSDK</span>
+        </div>
+      </mat-card-footer>
+    </mat-card>
+  </div>
+</div> 

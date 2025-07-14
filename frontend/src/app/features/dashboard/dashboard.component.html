@@ -1,0 +1,164 @@
+<div class="dashboard-container">
+  <h1 class="dashboard-title">Dashboard de Migración</h1>
+  
+  <mat-grid-list cols="4" rowHeight="150px" gutterSize="20px" class="stats-grid">
+    <mat-grid-tile>
+      <mat-card class="stat-card">
+        <mat-card-content>
+          <div class="stat-content">
+            <mat-icon class="stat-icon modules">folder</mat-icon>
+            <div class="stat-info">
+              <h3>{{ stats.totalModules }}</h3>
+              <p>Módulos Totales</p>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </mat-grid-tile>
+    
+    <mat-grid-tile>
+      <mat-card class="stat-card">
+        <mat-card-content>
+          <div class="stat-content">
+            <mat-icon class="stat-icon screens">visibility</mat-icon>
+            <div class="stat-info">
+              <h3>{{ stats.totalScreens }}</h3>
+              <p>Pantallas Totales</p>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </mat-grid-tile>
+    
+    <mat-grid-tile>
+      <mat-card class="stat-card">
+        <mat-card-content>
+          <div class="stat-content">
+            <mat-icon class="stat-icon analyzed">analytics</mat-icon>
+            <div class="stat-info">
+              <h3>{{ stats.analyzedScreens }}</h3>
+              <p>Analizadas</p>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </mat-grid-tile>
+    
+    <mat-grid-tile>
+      <mat-card class="stat-card">
+        <mat-card-content>
+          <div class="stat-content">
+            <mat-icon class="stat-icon generated">code</mat-icon>
+            <div class="stat-info">
+              <h3>{{ stats.generatedScreens }}</h3>
+              <p>Generadas</p>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </mat-grid-tile>
+  </mat-grid-list>
+  
+  <div class="dashboard-content">
+    <div class="left-panel">
+      <mat-card class="progress-card">
+        <mat-card-header>
+          <mat-card-title>Progreso de Migración</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="progress-info">
+            <h2>{{ stats.migrationProgress }}%</h2>
+            <p>Completado</p>
+          </div>
+          <mat-progress-bar 
+            mode="determinate" 
+            [value]="stats.migrationProgress"
+            class="progress-bar">
+          </mat-progress-bar>
+          <div class="progress-details">
+            <div class="detail-item">
+              <span>Módulos completados:</span>
+              <span>{{ stats.completedModules }}/{{ stats.totalModules }}</span>
+            </div>
+            <div class="detail-item">
+              <span>Pantallas migradas:</span>
+              <span>{{ stats.generatedScreens }}/{{ stats.totalScreens }}</span>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+      
+      <mat-card class="recent-activity">
+        <mat-card-header>
+          <mat-card-title>Actividad Reciente</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="activity-item" *ngFor="let activity of recentActivity">
+            <mat-icon [class]="'activity-icon ' + activity.type">{{ activity.icon }}</mat-icon>
+            <div class="activity-content">
+              <p>{{ activity.message }}</p>
+              <span class="activity-time">{{ activity.timestamp }}</span>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </div>
+    
+    <div class="right-panel">
+      <mat-card class="quick-actions">
+        <mat-card-header>
+          <mat-card-title>Acciones Rápidas</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="actions-grid">
+            <button mat-raised-button color="primary" class="action-button">
+              <mat-icon>settings</mat-icon>
+              Configurar Proyecto
+            </button>
+            
+            <button mat-raised-button color="accent" class="action-button">
+              <mat-icon>upload</mat-icon>
+              Vectorizar Código
+            </button>
+            
+            <button mat-raised-button class="action-button">
+              <mat-icon>analytics</mat-icon>
+              Analizar Pantalla
+            </button>
+            
+            <button mat-raised-button class="action-button">
+              <mat-icon>code</mat-icon>
+              Generar Código
+            </button>
+          </div>
+        </mat-card-content>
+      </mat-card>
+      
+      <mat-card class="system-status">
+        <mat-card-header>
+          <mat-card-title>Estado del Sistema</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="status-item">
+            <mat-chip color="primary">
+              <mat-icon>check_circle</mat-icon>
+              Base de Datos
+            </mat-chip>
+          </div>
+          <div class="status-item">
+            <mat-chip color="accent">
+              <mat-icon>cloud</mat-icon>
+              Vector Store
+            </mat-chip>
+          </div>
+          <div class="status-item">
+            <mat-chip color="warn">
+              <mat-icon>psychology</mat-icon>
+              LLM Service
+            </mat-chip>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </div>
+  </div>
+</div> 

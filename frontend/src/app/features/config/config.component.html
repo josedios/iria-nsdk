@@ -1,0 +1,275 @@
+<div class="config-container">
+  <div class="config-header">
+    <h1>Configuración del Sistema</h1>
+    <div class="header-actions">
+      <button mat-raised-button color="accent" (click)="testConfiguration()" [disabled]="loading">
+        <mat-icon>speed</mat-icon>
+        Probar Conexiones
+      </button>
+      <button mat-raised-button color="primary" (click)="saveConfiguration()" [disabled]="!configForm.valid || loading">
+        <mat-icon>save</mat-icon>
+        Guardar Configuración
+      </button>
+    </div>
+  </div>
+
+  <form [formGroup]="configForm" class="config-form">
+    <mat-tab-group class="config-tabs">
+      <!-- Configuración General -->
+      <mat-tab label="General">
+        <div class="tab-content">
+          <mat-card>
+            <mat-card-header>
+              <mat-card-title>Información General</mat-card-title>
+              <mat-card-subtitle>Configuración básica del proyecto</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Nombre del Proyecto</mat-label>
+                  <input matInput formControlName="name" placeholder="Migración NSDK - Cliente X">
+                  <mat-icon matSuffix>business</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-slide-toggle formControlName="isActive" color="primary">
+                  Configuración Activa
+                </mat-slide-toggle>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+
+      <!-- Repositorios -->
+      <mat-tab label="Repositorios">
+        <div class="tab-content">
+          <!-- Repositorio Origen -->
+          <mat-card class="repo-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>folder_open</mat-icon>
+                Repositorio Origen (NSDK)
+              </mat-card-title>
+              <mat-card-subtitle>Configuración del repositorio con código NSDK legacy</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content formGroupName="sourceRepo">
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>URL del Repositorio</mat-label>
+                  <input matInput formControlName="url" placeholder="https://github.com/empresa/nsdk-legacy.git">
+                  <mat-icon matSuffix>link</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Rama Principal</mat-label>
+                  <input matInput formControlName="branch" placeholder="main">
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Usuario</mat-label>
+                  <input matInput formControlName="username" placeholder="usuario-git">
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Token de Acceso</mat-label>
+                  <input matInput type="password" formControlName="token" placeholder="ghp_...">
+                  <mat-icon matSuffix>vpn_key</mat-icon>
+                </mat-form-field>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <!-- Repositorio Destino -->
+          <mat-card class="repo-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>folder_special</mat-icon>
+                Repositorio Destino (Angular/Spring Boot)
+              </mat-card-title>
+              <mat-card-subtitle>Configuración del repositorio donde se generará el código moderno</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content formGroupName="targetRepo">
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>URL del Repositorio</mat-label>
+                  <input matInput formControlName="url" placeholder="https://github.com/empresa/app-moderna.git">
+                  <mat-icon matSuffix>link</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Rama Principal</mat-label>
+                  <input matInput formControlName="branch" placeholder="main">
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Usuario</mat-label>
+                  <input matInput formControlName="username" placeholder="usuario-git">
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Token de Acceso</mat-label>
+                  <input matInput type="password" formControlName="token" placeholder="ghp_...">
+                  <mat-icon matSuffix>vpn_key</mat-icon>
+                </mat-form-field>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+
+      <!-- LLM -->
+      <mat-tab label="LLM">
+        <div class="tab-content">
+          <mat-card>
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>psychology</mat-icon>
+                Configuración del Modelo de Lenguaje
+              </mat-card-title>
+              <mat-card-subtitle>Configuración del proveedor LLM para análisis de código</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content formGroupName="llmConfig">
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Proveedor</mat-label>
+                  <mat-select formControlName="provider" (selectionChange)="onProviderChange($event.value)">
+                    <mat-option value="openai">OpenAI</mat-option>
+                    <mat-option value="ollama">Ollama</mat-option>
+                    <mat-option value="mistral">Mistral</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Modelo</mat-label>
+                  <mat-select formControlName="modelName">
+                    <mat-option *ngFor="let model of availableModels" [value]="model.value">
+                      {{ model.label }}
+                    </mat-option>
+                  </mat-select>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row" *ngIf="showApiKey">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>API Key</mat-label>
+                  <input matInput type="password" formControlName="apiKey" [placeholder]="apiKeyPlaceholder">
+                  <mat-icon matSuffix>key</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row" *ngIf="showBaseUrl">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>URL Base</mat-label>
+                  <input matInput formControlName="baseUrl" placeholder="http://localhost:11434">
+                  <mat-icon matSuffix>link</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Temperatura</mat-label>
+                  <input matInput type="number" formControlName="temperature" min="0" max="2" step="0.1">
+                  <mat-hint>0.0 - 2.0</mat-hint>
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Máximo de Tokens</mat-label>
+                  <input matInput type="number" formControlName="maxTokens" min="1" max="8192">
+                  <mat-hint>1 - 8192</mat-hint>
+                </mat-form-field>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+
+      <!-- Vector Store -->
+      <mat-tab label="Vector Store">
+        <div class="tab-content">
+          <mat-card>
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>storage</mat-icon>
+                Configuración del Vector Store
+              </mat-card-title>
+              <mat-card-subtitle>Configuración para almacenamiento de embeddings</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content formGroupName="vectorStoreConfig">
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Tipo de Vector Store</mat-label>
+                  <mat-select formControlName="type" (selectionChange)="onVectorStoreChange($event.value)">
+                    <mat-option value="faiss">FAISS</mat-option>
+                    <mat-option value="qdrant">Qdrant</mat-option>
+                    <mat-option value="chroma">Chroma</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Nombre de la Colección</mat-label>
+                  <input matInput formControlName="collectionName" placeholder="nsdk-embeddings">
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row" *ngIf="showConnectionString">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Cadena de Conexión</mat-label>
+                  <input matInput formControlName="connectionString" [placeholder]="connectionStringPlaceholder">
+                  <mat-icon matSuffix>settings</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Modelo de Embedding</mat-label>
+                  <input matInput formControlName="embeddingModel" placeholder="text-embedding-ada-002">
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Dimensión</mat-label>
+                  <input matInput type="number" formControlName="dimension" min="128" max="4096">
+                  <mat-hint>128 - 4096</mat-hint>
+                </mat-form-field>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </form>
+
+  <!-- Estado de Conexiones -->
+  <div class="connection-status" *ngIf="connectionStatus">
+    <mat-card>
+      <mat-card-header>
+        <mat-card-title>Estado de Conexiones</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="status-item" *ngFor="let status of connectionStatus">
+          <div class="status-content">
+            <mat-icon [class]="'status-icon ' + status.status">
+              {{ status.status === 'success' ? 'check_circle' : 
+                 status.status === 'error' ? 'error' : 'hourglass_empty' }}
+            </mat-icon>
+            <span class="status-service">{{ status.service }}</span>
+            <span class="status-message">{{ status.message }}</span>
+          </div>
+          <mat-progress-spinner *ngIf="status.status === 'testing'" 
+                               mode="indeterminate" 
+                               diameter="20">
+          </mat-progress-spinner>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+</div> 

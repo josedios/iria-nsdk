@@ -1,6 +1,6 @@
-# 🚀 Guía de Inicio Rápido - Prompt Maestro
+# 🚀 Guía de Inicio Rápido - Iria - NSDK Migration Platform
 
-Esta guía te ayudará a tener **Prompt Maestro** funcionando en menos de 10 minutos.
+Esta guía te ayudará a tener **Iria - NSDK Migration Platform** funcionando en menos de 10 minutos.
 
 ## 📋 Prerrequisitos
 
@@ -39,7 +39,7 @@ docker-compose logs -f
 - **API Docs**: http://localhost:8000/docs
 - **Database**: postgres://postgres:postgres@localhost:5432/prompt_maestro
 
-¡Listo! 🎉 Ya tienes Prompt Maestro funcionando.
+¡Listo! 🎉 Ya tienes Iria - NSDK Migration Platform funcionando.
 
 ## 🛠 Opción 2: Desarrollo Local
 
@@ -211,4 +211,4 @@ Una vez que tengas el sistema funcionando:
 
 ---
 
-¡Disfruta usando **Prompt Maestro** para modernizar tus aplicaciones NSDK! 🚀
+¡Disfruta usando **Iria - NSDK Migration Platform** para modernizar tus aplicaciones NSDK! 🚀

@@ -1,7 +1,7 @@
 export const environment = {
   production: false,
   apiUrl: 'http://localhost:8000',
-  title: 'Prompt Maestro - Migración NSDK',
+  title: 'Iria - NSDK Migration Platform - Migración NSDK',
   version: '1.0.0',
   features: {
     enableAnalytics: false,

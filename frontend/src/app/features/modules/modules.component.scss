@@ -1,0 +1,126 @@
+.modules-container {
+  padding: 20px;
+  height: 100%;
+}
+
+.modules-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modules-header h1 {
+  margin: 0;
+  color: #333;
+  font-weight: 300;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.modules-content {
+  height: calc(100vh - 140px);
+}
+
+.modules-tree-card {
+  height: 100%;
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.node-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.node-icon {
+  font-size: 20px;
+}
+
+.node-icon.node-type-module {
+  color: #2196F3;
+}
+
+.node-icon.node-type-screen {
+  color: #4CAF50;
+}
+
+.node-name {
+  font-weight: 500;
+}
+
+.status-chip {
+  font-size: 11px;
+  height: 24px;
+  border-radius: 12px;
+}
+
+.status-chip.status-pending {
+  background-color: #f5f5f5;
+  color: #666;
+}
+
+.status-chip.status-analyzing {
+  background-color: #FFF3E0;
+  color: #F57C00;
+}
+
+.status-chip.status-analyzed {
+  background-color: #E8F5E8;
+  color: #2E7D32;
+}
+
+.status-chip.status-generated {
+  background-color: #E3F2FD;
+  color: #1976D2;
+}
+
+.status-chip.status-error {
+  background-color: #FFEBEE;
+  color: #C62828;
+}
+
+.node-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.node-stats {
+  display: flex;
+  gap: 15px;
+  font-size: 12px;
+  color: #666;
+}
+
+.stat-item {
+  background-color: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .modules-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  
+  .header-actions {
+    width: 100%;
+  }
+  
+  .node-actions {
+    flex-direction: column;
+  }
+} 

@@ -1,0 +1,88 @@
+.sidenav-container {
+  height: 100vh;
+}
+
+.sidenav {
+  width: 250px;
+  transition: width 0.3s ease;
+}
+
+.sidenav.collapsed {
+  width: 64px;
+}
+
+.sidenav .mat-toolbar {
+  background: inherit;
+}
+
+.toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.main-content {
+  padding: 20px;
+  height: calc(100vh - 64px);
+  overflow: auto;
+}
+
+.drawer-toggle {
+  display: block;
+}
+
+.mat-nav-list .mat-list-item.active {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Estilos para cuando la sidebar está colapsada */
+.sidenav.collapsed .mat-list-item {
+  padding: 0;
+  justify-content: center;
+}
+
+.sidenav.collapsed .mat-list-item .mat-icon {
+  margin: 0;
+}
+
+.sidenav.collapsed .mat-toolbar {
+  justify-content: center;
+  padding: 0 8px;
+}
+
+.sidenav.collapsed .mat-toolbar .mat-icon {
+  margin: 0;
+}
+
+/* Tooltips para elementos colapsados */
+.sidenav.collapsed .mat-list-item {
+  position: relative;
+}
+
+.sidenav.collapsed .mat-list-item:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1000;
+  margin-left: 8px;
+}
+
+@media (max-width: 768px) {
+  .sidenav {
+    width: 100%;
+  }
+  
+  .sidenav.collapsed {
+    width: 100%;
+  }
+  
+  .drawer-toggle {
+    display: block;
+  }
+} 

@@ -1,0 +1,52 @@
+# Node
+node_modules/
+dist/
+build/
+.angular/
+
+# Angular
+out-tsc/
+coverage/
+
+# Environment
+.env
+.env.*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Backend
+backend/.env
+
+# Otros
+*.log
+*.tmp
+*.bak
+
+# Sistema
+Thumbs.db
+Desktop.ini
+
+# Test
+frontend/karma.conf.js
+frontend/package-lock.json
+frontend/tsconfig.app.json
+frontend/tsconfig.spec.json
+frontend/node_modules/
+frontend/.angular/ 

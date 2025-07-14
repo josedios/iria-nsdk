@@ -1,4 +1,4 @@
-# 🚀 Prompt Maestro - Plataforma de Migración NSDK
+# 🚀 Iria - NSDK Migration Platform - Plataforma de Migración NSDK
 
 Una plataforma completa para migrar aplicaciones legacy desarrolladas en NSDK hacia una arquitectura moderna con **Angular** (frontend) y **Spring Boot** (backend), asistida con IA.
 

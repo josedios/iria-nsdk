@@ -1,0 +1,53 @@
+/* You can add global styles to this file, and also import other style files */
+@import '@angular/material/prebuilt-themes/indigo-pink.css';
+
+html, body { height: 100%; }
+body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+
+/* Global styles for the application */
+.mat-mdc-card {
+  margin-bottom: 16px;
+}
+
+.mat-mdc-card-header {
+  padding: 16px;
+}
+
+.mat-mdc-card-content {
+  padding: 16px;
+}
+
+/* Status chip colors */
+.status-pending {
+  background-color: #ff9800 !important;
+  color: white !important;
+}
+
+.status-analyzing {
+  background-color: #2196f3 !important;
+  color: white !important;
+}
+
+.status-analyzed {
+  background-color: #4caf50 !important;
+  color: white !important;
+}
+
+.status-generated {
+  background-color: #9c27b0 !important;
+  color: white !important;
+}
+
+.status-error {
+  background-color: #f44336 !important;
+  color: white !important;
+}
+
+/* Node type icons */
+.node-type-module {
+  color: #ff9800;
+}
+
+.node-type-screen {
+  color: #2196f3;
+} 

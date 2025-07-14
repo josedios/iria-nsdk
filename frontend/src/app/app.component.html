@@ -1,0 +1,84 @@
+<mat-sidenav-container class="sidenav-container">
+  <mat-sidenav #drawer 
+               class="sidenav" 
+               [class.collapsed]="sidebarCollapsed"
+               fixedInViewport 
+               mode="side" 
+               [opened]="!sidebarCollapsed"
+               [mode]="sidebarCollapsed ? 'over' : 'side'">
+    <mat-toolbar>
+      <mat-icon>code</mat-icon>
+      <span class="toolbar-spacer" *ngIf="!sidebarCollapsed"></span>
+      <span *ngIf="!sidebarCollapsed">Iria - NSDK Migration Platform</span>
+    </mat-toolbar>
+    
+    <mat-nav-list>
+      <mat-list-item routerLink="/dashboard" routerLinkActive="active" data-tooltip="Dashboard">
+        <mat-icon matListItemIcon>dashboard</mat-icon>
+        <span matListItemTitle *ngIf="!sidebarCollapsed">Dashboard</span>
+      </mat-list-item>
+      
+      <mat-list-item routerLink="/modules" routerLinkActive="active" data-tooltip="Módulos">
+        <mat-icon matListItemIcon>folder</mat-icon>
+        <span matListItemTitle *ngIf="!sidebarCollapsed">Módulos</span>
+      </mat-list-item>
+      
+      <mat-list-item routerLink="/config" routerLinkActive="active" data-tooltip="Configuración">
+        <mat-icon matListItemIcon>settings</mat-icon>
+        <span matListItemTitle *ngIf="!sidebarCollapsed">Configuración</span>
+      </mat-list-item>
+      
+      <mat-list-item routerLink="/knowledge" routerLinkActive="active" data-tooltip="Conocimiento">
+        <mat-icon matListItemIcon>library_books</mat-icon>
+        <span matListItemTitle *ngIf="!sidebarCollapsed">Conocimiento</span>
+      </mat-list-item>
+      
+      <mat-divider *ngIf="!sidebarCollapsed"></mat-divider>
+      
+      <mat-list-item *ngIf="!sidebarCollapsed" data-tooltip="Ayuda">
+        <mat-icon matListItemIcon>help</mat-icon>
+        <span matListItemTitle>Ayuda</span>
+      </mat-list-item>
+    </mat-nav-list>
+  </mat-sidenav>
+  
+  <mat-sidenav-content>
+    <mat-toolbar color="primary">
+      <button
+        type="button"
+        mat-icon-button
+        (click)="toggleSidebar()"
+        class="drawer-toggle">
+        <mat-icon>{{ sidebarCollapsed ? 'menu' : 'menu_open' }}</mat-icon>
+      </button>
+      
+      <span>{{ title }}</span>
+      
+      <span class="toolbar-spacer"></span>
+      
+      <button mat-icon-button [matMenuTriggerFor]="menu">
+        <mat-icon>account_circle</mat-icon>
+      </button>
+      
+      <mat-menu #menu="matMenu">
+        <button mat-menu-item>
+          <mat-icon>person</mat-icon>
+          <span>Perfil</span>
+        </button>
+        <button mat-menu-item>
+          <mat-icon>settings</mat-icon>
+          <span>Configuración</span>
+        </button>
+        <mat-divider></mat-divider>
+        <button mat-menu-item>
+          <mat-icon>exit_to_app</mat-icon>
+          <span>Cerrar Sesión</span>
+        </button>
+      </mat-menu>
+    </mat-toolbar>
+    
+    <main class="main-content">
+      <router-outlet></router-outlet>
+    </main>
+  </mat-sidenav-content>
+</mat-sidenav-container> 

@@ -1,0 +1,183 @@
+.dashboard-container {
+  padding: 20px;
+}
+
+.dashboard-title {
+  margin-bottom: 30px;
+  color: #333;
+  font-weight: 300;
+}
+
+.stats-grid {
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-content {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.stat-icon {
+  font-size: 40px;
+  width: 40px;
+  height: 40px;
+}
+
+.stat-icon.modules { color: #2196F3; }
+.stat-icon.screens { color: #4CAF50; }
+.stat-icon.analyzed { color: #FF9800; }
+.stat-icon.generated { color: #9C27B0; }
+
+.stat-info h3 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.stat-info p {
+  margin: 5px 0 0 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.dashboard-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.left-panel, .right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.progress-card {
+  padding: 20px;
+}
+
+.progress-info {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.progress-info h2 {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 300;
+  color: #2196F3;
+}
+
+.progress-bar {
+  height: 10px;
+  border-radius: 5px;
+  margin-bottom: 20px;
+}
+
+.progress-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.recent-activity {
+  flex: 1;
+}
+
+.activity-item {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.activity-item:last-child {
+  border-bottom: none;
+}
+
+.activity-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+}
+
+.activity-icon.success { color: #4CAF50; }
+.activity-icon.warning { color: #FF9800; }
+.activity-icon.info { color: #2196F3; }
+
+.activity-content {
+  flex: 1;
+}
+
+.activity-content p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.activity-time {
+  font-size: 12px;
+  color: #666;
+}
+
+.quick-actions {
+  padding: 20px;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+
+.action-button {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 20px;
+  height: 80px;
+}
+
+.system-status {
+  padding: 20px;
+}
+
+.status-item {
+  margin-bottom: 10px;
+}
+
+.status-item mat-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  .dashboard-content {
+    grid-template-columns: 1fr;
+  }
+  
+  .actions-grid {
+    grid-template-columns: 1fr;
+  }
+} 
