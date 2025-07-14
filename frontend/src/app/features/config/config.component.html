@@ -85,20 +85,60 @@
             </mat-card-content>
           </mat-card>
 
-          <!-- Repositorio Destino -->
+          <!-- Repositorio Destino Frontend -->
           <mat-card class="repo-card">
             <mat-card-header>
               <mat-card-title>
-                <mat-icon>folder_special</mat-icon>
-                Repositorio Destino (Angular/Spring Boot)
+                <mat-icon>web</mat-icon>
+                Repositorio Frontend (Angular)
               </mat-card-title>
-              <mat-card-subtitle>Configuración del repositorio donde se generará el código moderno</mat-card-subtitle>
+              <mat-card-subtitle>Configuración del repositorio donde se generará el código Angular</mat-card-subtitle>
             </mat-card-header>
-            <mat-card-content formGroupName="targetRepo">
+            <mat-card-content formGroupName="frontendRepo">
               <div class="form-row">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>URL del Repositorio</mat-label>
-                  <input matInput formControlName="url" placeholder="https://github.com/empresa/app-moderna.git">
+                  <input matInput formControlName="url" placeholder="https://github.com/empresa/app-frontend.git">
+                  <mat-icon matSuffix>link</mat-icon>
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline">
+                  <mat-label>Rama Principal</mat-label>
+                  <input matInput formControlName="branch" placeholder="main">
+                </mat-form-field>
+                
+                <mat-form-field appearance="outline">
+                  <mat-label>Usuario</mat-label>
+                  <input matInput formControlName="username" placeholder="usuario-git">
+                </mat-form-field>
+              </div>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Token de Acceso</mat-label>
+                  <input matInput type="password" formControlName="token" placeholder="ghp_...">
+                  <mat-icon matSuffix>vpn_key</mat-icon>
+                </mat-form-field>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <!-- Repositorio Destino Backend -->
+          <mat-card class="repo-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>code</mat-icon>
+                Repositorio Backend (Spring Boot)
+              </mat-card-title>
+              <mat-card-subtitle>Configuración del repositorio donde se generará el código Spring Boot</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content formGroupName="backendRepo">
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>URL del Repositorio</mat-label>
+                  <input matInput formControlName="url" placeholder="https://github.com/empresa/app-backend.git">
                   <mat-icon matSuffix>link</mat-icon>
                 </mat-form-field>
               </div>

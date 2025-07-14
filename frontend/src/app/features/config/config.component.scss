@@ -1,0 +1,179 @@
+.config-container {
+  padding: 20px;
+  height: 100%;
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.config-header h1 {
+  margin: 0;
+  color: #333;
+  font-weight: 300;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.config-form {
+  height: calc(100vh - 140px);
+  width: 100%;
+}
+
+.config-tabs {
+  height: 100%;
+}
+
+.tab-content {
+  padding: 20px 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tab-content mat-card {
+  width: 100%;
+  max-width: 600px;
+}
+
+.form-row {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.form-row .full-width {
+  flex: 1;
+}
+
+.form-row mat-form-field {
+  flex: 1;
+}
+
+.repo-card {
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 600px;
+}
+
+.repo-card .mat-card-header {
+  padding-bottom: 10px;
+}
+
+.repo-card .mat-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-status {
+  margin-top: 20px;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.status-item:last-child {
+  border-bottom: none;
+}
+
+.status-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.status-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+}
+
+.status-icon.success {
+  color: #4CAF50;
+}
+
+.status-icon.error {
+  color: #f44336;
+}
+
+.status-icon.testing {
+  color: #FF9800;
+}
+
+.status-service {
+  font-weight: 500;
+  min-width: 200px;
+}
+
+.status-message {
+  color: #666;
+  font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .config-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  
+  .header-actions {
+    width: 100%;
+  }
+  
+  .form-row {
+    flex-direction: column;
+  }
+  
+  .status-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
+  
+  .status-service {
+    min-width: auto;
+  }
+} 
+
+mat-card .mat-card-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+mat-card .form-row {
+  width: 100%;
+  max-width: 500px;
+} 
+
+mat-card, .repo-card {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+@media (max-width: 768px) {
+  .tab-content {
+    padding: 10px 0;
+  }
+} 
