@@ -1,6 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List
+from .domain.entities.configuration import Configuration
+from .application.dto.configuration_dto import ConfigurationDTO
+from .infrastructure.repositories.configuration_repository_impl import ConfigurationRepositoryImpl
+from .database import get_db
+from sqlalchemy.orm import Session
 
 app = FastAPI(title="Prompt Maestro Backend API")
 
@@ -13,35 +18,62 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- ENDPOINTS DE CONFIGURACIÓN ---
-@app.get("/configurations", tags=["Configuración"])
+# Instancia del repositorio
+config_repo = ConfigurationRepositoryImpl()
+
+@app.get("/configurations", response_model=List[ConfigurationDTO], tags=["Configuración"])
 def get_configurations():
     """Listar todas las configuraciones"""
-    return []
+    configs = config_repo.db.query(Configuration).all()
+    return configs
 
 @app.get("/configurations/active", tags=["Configuración"])
 def get_active_configuration():
     """Obtener la configuración activa"""
     return {}
 
-@app.get("/configurations/{config_id}", tags=["Configuración"])
+@app.get("/configurations/{config_id}", response_model=ConfigurationDTO, tags=["Configuración"])
 def get_configuration(config_id: str):
     """Obtener una configuración por ID"""
-    return {}
+    config = config_repo.db.query(Configuration).filter(Configuration.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuración no encontrada")
+    return config
 
-@app.post("/configurations", tags=["Configuración"])
-def create_configuration():
+@app.post("/configurations", response_model=ConfigurationDTO, tags=["Configuración"])
+def create_configuration(config: ConfigurationDTO):
     """Crear una nueva configuración"""
-    return {}
+    db_config = Configuration(
+        name=config.name,
+        description=config.description,
+        config_data=config.config_data
+    )
+    config_repo.db.add(db_config)
+    config_repo.db.commit()
+    config_repo.db.refresh(db_config)
+    return db_config
 
-@app.put("/configurations/{config_id}", tags=["Configuración"])
-def update_configuration(config_id: str):
+@app.put("/configurations/{config_id}", response_model=ConfigurationDTO, tags=["Configuración"])
+def update_configuration(config_id: str, config: ConfigurationDTO):
     """Actualizar una configuración"""
-    return {}
+    db_config = config_repo.db.query(Configuration).filter(Configuration.id == config_id).first()
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Configuración no encontrada")
+    db_config.name = config.name
+    db_config.description = config.description
+    db_config.config_data = config.config_data
+    config_repo.db.commit()
+    config_repo.db.refresh(db_config)
+    return db_config
 
 @app.delete("/configurations/{config_id}", tags=["Configuración"])
 def delete_configuration(config_id: str):
     """Eliminar una configuración"""
+    db_config = config_repo.db.query(Configuration).filter(Configuration.id == config_id).first()
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Configuración no encontrada")
+    config_repo.db.delete(db_config)
+    config_repo.db.commit()
     return {"deleted": True}
 
 @app.post("/configurations/{config_id}/activate", tags=["Configuración"])

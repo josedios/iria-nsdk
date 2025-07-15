@@ -1,54 +1,19 @@
-import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { MatCardModule } from '@angular/material/card';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
-import { MatSelectModule } from '@angular/material/select';
+import { Component, OnInit } from '@angular/core';
+import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
-import { MatTabsModule } from '@angular/material/tabs';
-import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { MatDividerModule } from '@angular/material/divider';
+import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
-
-interface Configuration {
-  id?: string;
-  name: string;
-  sourceRepo: RepositoryConfig;
-  frontendRepo: RepositoryConfig;
-  backendRepo: RepositoryConfig;
-  llmConfig: LLMConfig;
-  vectorStoreConfig: VectorStoreConfig;
-  isActive: boolean;
-}
-
-interface RepositoryConfig {
-  url: string;
-  branch: string;
-  username?: string;
-  token?: string;
-  sshKey?: string;
-}
-
-interface LLMConfig {
-  provider: 'openai' | 'ollama' | 'mistral';
-  apiKey?: string;
-  baseUrl?: string;
-  modelName: string;
-  temperature: number;
-  maxTokens: number;
-}
-
-interface VectorStoreConfig {
-  type: 'faiss' | 'qdrant' | 'chroma';
-  connectionString?: string;
-  collectionName: string;
-  embeddingModel: string;
-  dimension: number;
-}
+import { MatDividerModule } from '@angular/material/divider';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSelectModule } from '@angular/material/select';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTabsModule } from '@angular/material/tabs';
+import { ConfigService, Configuration } from './config.service';
 
 @Component({
   selector: 'app-config',
@@ -75,8 +40,10 @@ interface VectorStoreConfig {
 export class ConfigComponent implements OnInit {
   configForm: FormGroup;
   loading = false;
+  configs: Configuration[] = [];
+  selectedConfigId: string | null = null;
 
-  availableModels: {label: string, value: string}[] = [];
+  availableModels: { label: string, value: string }[] = [];
   showApiKey = true;
   showBaseUrl = false;
   apiKeyPlaceholder = 'sk-...';
@@ -84,23 +51,25 @@ export class ConfigComponent implements OnInit {
   showConnectionString = false;
   connectionStringPlaceholder = '';
 
-  connectionStatus: {service: string, status: 'success' | 'error' | 'testing', message: string}[] | null = null;
+  connectionStatus: { service: string, status: 'success' | 'error' | 'testing', message: string }[] | null = null;
 
   constructor(
     private fb: FormBuilder,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private configService: ConfigService
   ) {
     this.configForm = this.createForm();
   }
 
   ngOnInit() {
-    this.loadConfiguration();
+    this.loadConfigurations();
   }
 
   createForm(): FormGroup {
     return this.fb.group({
       name: ['', Validators.required],
-      isActive: [true],
+      description: [''],
+      isActive: [true], // Añadir el campo isActive al formulario
       sourceRepo: this.fb.group({
         url: ['', Validators.required],
         branch: ['main', Validators.required],
@@ -137,10 +106,93 @@ export class ConfigComponent implements OnInit {
     });
   }
 
+  loadConfigurations() {
+    this.loading = true;
+    this.configService.getAll().subscribe({
+      next: (configs) => {
+        this.configs = configs;
+        if (configs.length > 0) {
+          this.selectConfiguration(configs[0]);
+        }
+        this.loading = false;
+      },
+      error: () => {
+        this.snackBar.open('Error al cargar configuraciones', 'Cerrar', { duration: 3000, panelClass: ['error-snackbar'] });
+        this.loading = false;
+      }
+    });
+  }
+
+  selectConfiguration(config: Configuration) {
+    this.selectedConfigId = config.id || null;
+    this.configForm.patchValue({
+      name: config.name,
+      description: config.description || '',
+      isActive: config.config_data?.isActive ?? true, // Mapear isActive al cargar
+      ...config.config_data
+    });
+  }
+
+  saveConfiguration() {
+    if (this.configForm.valid) {
+      this.loading = true;
+      const formValue = this.configForm.value;
+      // Empaquetar todos los datos anidados en config_data
+      const config: Configuration = {
+        id: this.selectedConfigId || undefined,
+        name: formValue.name,
+        description: formValue.description,
+        config_data: {
+          isActive: formValue.isActive, // Guardar isActive
+          sourceRepo: formValue.sourceRepo,
+          frontendRepo: formValue.frontendRepo,
+          backendRepo: formValue.backendRepo,
+          llmConfig: formValue.llmConfig,
+          vectorStoreConfig: formValue.vectorStoreConfig
+        }
+      };
+      let obs;
+      if (this.selectedConfigId) {
+        obs = this.configService.update(this.selectedConfigId, config);
+      } else {
+        obs = this.configService.create(config);
+      }
+      obs.subscribe({
+        next: () => {
+          this.snackBar.open('Configuración guardada exitosamente', 'Cerrar', { duration: 3000, panelClass: ['success-snackbar'] });
+          this.loading = false;
+        },
+        error: () => {
+          this.snackBar.open('Error al guardar configuración', 'Cerrar', { duration: 3000, panelClass: ['error-snackbar'] });
+          this.loading = false;
+        }
+      });
+    }
+  }
+
+  deleteConfiguration() {
+    if (this.selectedConfigId) {
+      this.loading = true;
+      this.configService.delete(this.selectedConfigId).subscribe({
+        next: () => {
+          this.snackBar.open('Configuración eliminada', 'Cerrar', { duration: 3000, panelClass: ['success-snackbar'] });
+          this.selectedConfigId = null;
+          this.configForm.reset();
+          this.loadConfigurations();
+          this.loading = false;
+        },
+        error: () => {
+          this.snackBar.open('Error al eliminar configuración', 'Cerrar', { duration: 3000, panelClass: ['error-snackbar'] });
+          this.loading = false;
+        }
+      });
+    }
+  }
+
   onProviderChange(provider: string) {
     this.showApiKey = provider !== 'ollama';
     this.showBaseUrl = provider === 'ollama';
-    
+
     switch (provider) {
       case 'openai':
         this.availableModels = [
@@ -150,7 +202,7 @@ export class ConfigComponent implements OnInit {
         ];
         this.apiKeyPlaceholder = 'sk-...';
         break;
-      
+
       case 'ollama':
         this.availableModels = [
           { label: 'Llama 2 7B', value: 'llama2' },
@@ -159,7 +211,7 @@ export class ConfigComponent implements OnInit {
           { label: 'CodeLlama', value: 'codellama' }
         ];
         break;
-      
+
       case 'mistral':
         this.availableModels = [
           { label: 'Mistral 7B Instruct', value: 'mistral-tiny' },
@@ -169,7 +221,7 @@ export class ConfigComponent implements OnInit {
         this.apiKeyPlaceholder = 'Mistral API Key';
         break;
     }
-    
+
     // Actualizar modelo por defecto
     if (this.availableModels.length > 0) {
       this.configForm.get('llmConfig.modelName')?.setValue(this.availableModels[0].value);
@@ -178,7 +230,7 @@ export class ConfigComponent implements OnInit {
 
   onVectorStoreChange(type: string) {
     this.showConnectionString = type !== 'faiss';
-    
+
     switch (type) {
       case 'qdrant':
         this.connectionStringPlaceholder = 'http://localhost:6333';
@@ -188,29 +240,6 @@ export class ConfigComponent implements OnInit {
         break;
       default:
         this.connectionStringPlaceholder = '';
-    }
-  }
-
-  loadConfiguration() {
-    // Aquí cargarías la configuración desde el backend
-    console.log('Loading configuration...');
-  }
-
-  saveConfiguration() {
-    if (this.configForm.valid) {
-      this.loading = true;
-      const config: Configuration = this.configForm.value;
-      
-      // Simular guardado
-      setTimeout(() => {
-        this.loading = false;
-        this.snackBar.open('Configuración guardada exitosamente', 'Cerrar', {
-          duration: 3000,
-          panelClass: ['success-snackbar']
-        });
-      }, 2000);
-      
-      console.log('Saving configuration:', config);
     }
   }
 

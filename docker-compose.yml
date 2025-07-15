@@ -6,7 +6,7 @@ services:
     image: postgres:15-alpine
     container_name: prompt-maestro-db
     environment:
-      POSTGRES_DB: prompt_maestro
+      POSTGRES_DB: iria_nsdk
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -26,7 +26,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/prompt_maestro
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/iria_nsdk
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=development
     depends_on:

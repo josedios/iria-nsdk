@@ -30,9 +30,23 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+.venv/
+venv/
+env/
 
 # Backend
 backend/.env
+backend/.venv/
+backend/venv/
+backend/env/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
 # Otros
 *.log

@@ -4,6 +4,11 @@ from enum import Enum
 from datetime import datetime
 import uuid
 
+from sqlalchemy import Column, String, Text, JSON, DateTime
+from sqlalchemy.dialects.postgresql import UUID
+
+from ...database import Base
+
 class LLMProvider(Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
@@ -49,17 +54,15 @@ class VectorStoreConfig:
         if self.additional_params is None:
             self.additional_params = {}
 
-@dataclass
-class Configuration:
-    id: str
-    name: str
-    source_repo: RepositoryConfig
-    target_repo: RepositoryConfig
-    llm_config: LLMConfig
-    vector_store_config: VectorStoreConfig
-    is_active: bool = True
-    created_at: datetime = None
-    updated_at: datetime = None
+class Configuration(Base):
+    __tablename__ = "configurations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    config_data = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def __post_init__(self):
         if self.id is None:
