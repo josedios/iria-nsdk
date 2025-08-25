@@ -245,24 +245,24 @@ export class ConfigComponent implements OnInit {
 
   testConfiguration() {
     this.loading = true;
-    this.connectionStatus = [
-      { service: 'Repositorio Origen (NSDK)', status: 'testing', message: 'Probando conexión...' },
-      { service: 'Repositorio Frontend (Angular)', status: 'testing', message: 'Probando conexión...' },
-      { service: 'Repositorio Backend (Spring Boot)', status: 'testing', message: 'Probando conexión...' },
-      { service: 'LLM Provider', status: 'testing', message: 'Probando API...' },
-      { service: 'Vector Store', status: 'testing', message: 'Probando conexión...' }
-    ];
-
-    // Simular prueba de conexiones
-    setTimeout(() => {
-      this.connectionStatus = [
-        { service: 'Repositorio Origen (NSDK)', status: 'success', message: 'Conexión exitosa - 245 archivos .SCR encontrados' },
-        { service: 'Repositorio Frontend (Angular)', status: 'success', message: 'Conexión exitosa - Permisos de escritura confirmados' },
-        { service: 'Repositorio Backend (Spring Boot)', status: 'success', message: 'Conexión exitosa - Permisos de escritura confirmados' },
-        { service: 'LLM Provider', status: 'success', message: 'API funcional - Modelo GPT-4 disponible' },
-        { service: 'Vector Store', status: 'error', message: 'Error de conexión - Verificar URL del servidor' }
-      ];
-      this.loading = false;
-    }, 3000);
+    const formValue = this.configForm.value;
+    const config_data = {
+      isActive: formValue.isActive,
+      sourceRepo: formValue.sourceRepo,
+      frontendRepo: formValue.frontendRepo,
+      backendRepo: formValue.backendRepo,
+      llmConfig: formValue.llmConfig,
+      vectorStoreConfig: formValue.vectorStoreConfig
+    };
+    this.configService.testConnections(config_data).subscribe({
+      next: (results) => {
+        this.connectionStatus = results;
+        this.loading = false;
+      },
+      error: () => {
+        this.snackBar.open('Error al probar conexiones', 'Cerrar', { duration: 3000, panelClass: ['error-snackbar'] });
+        this.loading = false;
+      }
+    });
   }
 }

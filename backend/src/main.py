@@ -1,11 +1,13 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Dict, Any, Optional
 from .domain.entities.configuration import Configuration
 from .application.dto.configuration_dto import ConfigurationDTO
 from .infrastructure.repositories.configuration_repository_impl import ConfigurationRepositoryImpl
 from .database import get_db
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from .application.use_cases.test_connections_use_case import TestConnectionsUseCase
 
 app = FastAPI(title="Prompt Maestro Backend API")
 
@@ -20,6 +22,14 @@ app.add_middleware(
 
 # Instancia del repositorio
 config_repo = ConfigurationRepositoryImpl()
+
+class TestConnectionsRequest(BaseModel):
+    config_data: Dict[str, Any]
+
+class TestConnectionsResult(BaseModel):
+    service: str
+    status: str  # "success" o "error"
+    message: str
 
 @app.get("/configurations", response_model=List[ConfigurationDTO], tags=["Configuración"])
 def get_configurations():
@@ -81,26 +91,125 @@ def activate_configuration(config_id: str):
     """Activar una configuración"""
     return {"activated": True}
 
+@app.post("/configurations/test-connections", response_model=List[TestConnectionsResult], tags=["Configuración"])
+def test_connections(request: TestConnectionsRequest):
+    use_case = TestConnectionsUseCase()
+    return use_case.execute(request.config_data)
+
 # --- ENDPOINTS DE VECTOR STORE Y VECTORIZE ---
-@app.post("/vectorize", tags=["Vectorización"])
-def vectorize_repositories():
-    """Iniciar vectorización de los repositorios"""
-    return {"status": "started"}
+from .application.use_cases.vectorization_use_case import VectorizationUseCase
+from .infrastructure.services.nsdk_vectorization_service import NSDKVectorizationService
+from .infrastructure.services.vector_store_service_impl import VectorStoreServiceImpl
+from .infrastructure.services.llm_service_impl import LLMServiceImpl
+
+# Instanciar servicios
+vector_store_service = VectorStoreServiceImpl()
+llm_service = LLMServiceImpl()
+nsdk_vectorization_service = NSDKVectorizationService(vector_store_service, llm_service)
+vectorization_use_case = VectorizationUseCase(nsdk_vectorization_service)
+
+class VectorizeRepositoryRequest(BaseModel):
+    repo_url: str
+    branch: str = 'main'
+    username: Optional[str] = None
+    token: Optional[str] = None
+
+class VectorizeModuleRequest(BaseModel):
+    module_path: str
+    repo_url: str
+    branch: str = 'main'
+
+class SearchCodeRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+@app.post("/vectorize/repository", tags=["Vectorización"])
+async def vectorize_repository(request: VectorizeRepositoryRequest):
+    """Vectorizar un repositorio completo de NSDK"""
+    try:
+        batch = await vectorization_use_case.vectorize_repository(
+            repo_url=request.repo_url,
+            branch=request.branch,
+            username=request.username,
+            token=request.token
+        )
+        return {
+            "status": "started",
+            "batch_id": batch.id,
+            "batch_name": batch.name,
+            "total_files": batch.total_files
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en vectorización: {str(e)}")
+
+@app.post("/vectorize/module", tags=["Vectorización"])
+async def vectorize_module(request: VectorizeModuleRequest):
+    """Vectorizar un módulo específico"""
+    try:
+        batch = await vectorization_use_case.vectorize_module(
+            module_path=request.module_path,
+            repo_url=request.repo_url,
+            branch=request.branch
+        )
+        return {
+            "status": "started",
+            "batch_id": batch.id,
+            "batch_name": batch.name,
+            "total_files": batch.total_files
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en vectorización del módulo: {str(e)}")
 
 @app.get("/vectorize/stats", tags=["Vectorización"])
 def get_vectorization_stats():
     """Obtener estadísticas de vectorización"""
-    return {}
-
-@app.post("/vectorize/docs", tags=["Vectorización"])
-def vectorize_documentation():
-    """Vectorizar documentación técnica"""
-    return {"status": "completed"}
+    try:
+        stats = vectorization_use_case.get_vectorization_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}")
 
 @app.post("/vectorize/search", tags=["Vectorización"])
-def search_similar_code():
+async def search_similar_code(request: SearchCodeRequest):
     """Buscar código similar en el vector store"""
-    return []
+    try:
+        results = await vectorization_use_case.search_similar_code(
+            query=request.query,
+            limit=request.limit
+        )
+        return {
+            "query": request.query,
+            "results": results,
+            "total_results": len(results)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error en búsqueda: {str(e)}")
+
+@app.get("/vectorize/batch/{batch_id}", tags=["Vectorización"])
+def get_batch_status(batch_id: str):
+    """Obtener estado de un lote de vectorización"""
+    try:
+        batch_status = vectorization_use_case.get_batch_status(batch_id)
+        if batch_status:
+            return batch_status
+        else:
+            raise HTTPException(status_code=404, detail="Lote no encontrado")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estado del lote: {str(e)}")
+
+@app.post("/vectorize/batch/{batch_id}/cancel", tags=["Vectorización"])
+def cancel_batch(batch_id: str):
+    """Cancelar un lote de vectorización"""
+    try:
+        success = vectorization_use_case.cancel_batch(batch_id)
+        if success:
+            return {"status": "cancelled", "batch_id": batch_id}
+        else:
+            return {"status": "not_cancelled", "message": "No se pudo cancelar el lote"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error cancelando lote: {str(e)}")
 
 # --- ENDPOINTS DE MÓDULOS Y PANTALLAS ---
 @app.get("/modules", tags=["Módulos"])

@@ -128,6 +128,21 @@
   font-size: 14px;
 }
 
+.success {
+  color: #43a047 !important;
+}
+.error {
+  color: #e53935 !important;
+}
+.connection-status-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.connection-status-row mat-icon {
+  margin-right: 8px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .config-header {

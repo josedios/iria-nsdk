@@ -1,23 +1,26 @@
-import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
-import { MatTabsModule } from '@angular/material/tabs';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { MatSelectModule } from '@angular/material/select';
-import { MatTableModule } from '@angular/material/table';
 import { MatPaginatorModule } from '@angular/material/paginator';
-import { MatSortModule } from '@angular/material/sort';
-import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
-import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSelectModule } from '@angular/material/select';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSortModule } from '@angular/material/sort';
+import { MatTableModule } from '@angular/material/table';
+import { MatTabsModule } from '@angular/material/tabs';
+import { KnowledgeService, SearchCodeRequest, VectorizationBatch, VectorizationStats, VectorizeRepositoryRequest } from './knowledge.service';
+import { VectorizeRepoDialogComponent, VectorizeRepoDialogData } from './vectorize-repo-dialog.component';
 
-interface VectorizationStats {
+// Interfaces locales para el componente
+interface LocalVectorizationStats {
   totalDocuments: number;
   sourceDocuments: number;
   targetDocuments: number;
@@ -36,7 +39,8 @@ interface DocumentInfo {
   similarity?: number;
 }
 
-interface SearchResult {
+// Interfaz local para resultados de búsqueda (compatible con el template)
+interface LocalSearchResult {
   id: string;
   content: string;
   metadata: {
@@ -616,9 +620,9 @@ export class KnowledgeComponent implements OnInit {
   // Estados
   isVectorizing = false;
   isSearching = false;
-  
+
   // Datos de estadísticas
-  stats: VectorizationStats = {
+  stats: LocalVectorizationStats = {
     totalDocuments: 1247,
     sourceDocuments: 823,
     targetDocuments: 312,
@@ -626,139 +630,191 @@ export class KnowledgeComponent implements OnInit {
     lastUpdated: '2024-01-15 14:30:00',
     collectionSize: '2.3 GB'
   };
-  
+
   // Progreso de vectorización
   vectorizationStatus = '';
   vectorizationProgress = 0;
   processedFiles = 0;
   totalFiles = 0;
-  
+
   // Búsqueda
   searchQuery = '';
   searchType = 'all';
-  searchResults: SearchResult[] = [];
-  
+  searchResults: LocalSearchResult[] = [];
+
   // Documentos
   documents: DocumentInfo[] = [];
   displayedColumns = ['name', 'type', 'size', 'status', 'lastModified', 'actions'];
 
   constructor(
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
-  ) {}
+    private dialog: MatDialog,
+    private knowledgeService: KnowledgeService
+  ) { }
 
   ngOnInit() {
     this.loadDocuments();
+    this.loadVectorizationStats();
   }
 
   vectorizeRepositories() {
+    const dialogRef = this.dialog.open(VectorizeRepoDialogComponent, {
+      width: '500px',
+      data: {
+        repo_url: '',
+        branch: 'main',
+        username: '',
+        token: ''
+      }
+    });
+
+    dialogRef.afterClosed().subscribe((result: VectorizeRepoDialogData) => {
+      if (result && result.repo_url) {
+        this.startVectorization(result);
+      }
+    });
+  }
+
+  private startVectorization(data: VectorizeRepoDialogData) {
     this.isVectorizing = true;
     this.vectorizationProgress = 0;
     this.processedFiles = 0;
-    this.totalFiles = 1200;
-    
-    // Simular proceso de vectorización
-    const interval = setInterval(() => {
-      this.vectorizationProgress += 2;
-      this.processedFiles += 24;
-      
-      if (this.vectorizationProgress <= 30) {
-        this.vectorizationStatus = 'Clonando repositorios...';
-      } else if (this.vectorizationProgress <= 60) {
-        this.vectorizationStatus = 'Procesando archivos NSDK...';
-      } else if (this.vectorizationProgress <= 90) {
-        this.vectorizationStatus = 'Generando embeddings...';
-      } else {
-        this.vectorizationStatus = 'Indexando en vector store...';
-      }
-      
-      if (this.vectorizationProgress >= 100) {
+    this.totalFiles = 0;
+    this.vectorizationStatus = 'Iniciando vectorización...';
+
+    const vectorizeRequest: VectorizeRepositoryRequest = {
+      repo_url: data.repo_url,
+      branch: data.branch,
+      username: data.username || undefined,
+      token: data.token || undefined
+    };
+
+    this.knowledgeService.vectorizeRepository(vectorizeRequest).subscribe({
+      next: (response) => {
+        console.log('Vectorización iniciada:', response);
+        this.vectorizationStatus = `Vectorización iniciada. Lote: ${response.batch_id}`;
+
+        // Monitorear progreso del lote
+        if (response.batch_id) {
+          this.monitorBatchProgress(response.batch_id);
+        }
+      },
+      error: (error) => {
+        console.error('Error en vectorización:', error);
         this.isVectorizing = false;
-        this.vectorizationStatus = 'Vectorización completada';
-        this.snackBar.open('Vectorización completada exitosamente', 'Cerrar', {
-          duration: 3000,
-          panelClass: ['success-snackbar']
+        this.vectorizationStatus = 'Error en vectorización';
+        this.snackBar.open('Error al iniciar vectorización: ' + error.message, 'Cerrar', {
+          duration: 5000,
+          panelClass: ['error-snackbar']
         });
-        clearInterval(interval);
-        
-        // Actualizar estadísticas
-        this.stats.totalDocuments += 156;
-        this.stats.sourceDocuments += 89;
-        this.stats.targetDocuments += 67;
-        this.stats.lastUpdated = new Date().toLocaleString();
       }
-    }, 150);
+    });
+  }
+
+  private loadVectorizationStats() {
+    this.knowledgeService.getVectorizationStats().subscribe({
+      next: (stats: VectorizationStats) => {
+        console.log('Estadísticas de vectorización:', stats);
+        // Mapear propiedades del backend a la interfaz local
+        this.stats.totalDocuments = stats.total_files || 0;
+        this.stats.sourceDocuments = stats.vectorized_files || 0;
+        this.stats.targetDocuments = 0; // Por ahora
+        this.stats.documentationDocuments = 0; // Por ahora
+        this.stats.lastUpdated = stats.last_vectorization || 'Nunca';
+        this.stats.collectionSize = `${stats.total_files || 0} archivos`;
+      },
+      error: (error) => {
+        console.error('Error cargando estadísticas:', error);
+        // Mantener estadísticas por defecto
+      }
+    });
+  }
+
+  private monitorBatchProgress(batchId: string) {
+    const checkProgress = () => {
+      this.knowledgeService.getBatchStatus(batchId).subscribe({
+        next: (batch: VectorizationBatch) => {
+          // Calcular progreso basado en archivos procesados
+          this.vectorizationProgress = batch.total_files > 0 ?
+            Math.round((batch.processed_files / batch.total_files) * 100) : 0;
+          this.processedFiles = batch.processed_files || 0;
+          this.totalFiles = batch.total_files || 0;
+
+          if (batch.status === 'in_progress') {
+            this.vectorizationStatus = 'Procesando archivos NSDK...';
+            // Continuar monitoreando
+            setTimeout(checkProgress, 2000);
+          } else if (batch.status === 'completed') {
+            this.isVectorizing = false;
+            this.vectorizationStatus = 'Vectorización completada';
+            this.snackBar.open('Vectorización completada exitosamente', 'Cerrar', {
+              duration: 3000,
+              panelClass: ['success-snackbar']
+            });
+            this.loadVectorizationStats();
+          } else if (batch.status === 'failed') {
+            this.isVectorizing = false;
+            this.vectorizationStatus = 'Vectorización fallida';
+            // Mensaje de error genérico ya que metadata no está disponible en VectorizationBatch
+            this.snackBar.open('Vectorización fallida: Error en el proceso', 'Cerrar', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error obteniendo estado del lote:', error);
+          this.vectorizationStatus = 'Error obteniendo progreso';
+          setTimeout(checkProgress, 5000); // Reintentar
+        }
+      });
+    };
+
+    checkProgress();
   }
 
   performSearch() {
     if (!this.searchQuery) return;
-    
+
     this.isSearching = true;
     this.searchResults = [];
-    
-    // Simular búsqueda
-    setTimeout(() => {
-      this.searchResults = [
-        {
-          id: '1',
-          content: `function calcularImpuestos(baseImponible, tipoCliente) {
-    let porcentajeIVA = tipoCliente === 'empresa' ? 0.21 : 0.18;
-    let iva = baseImponible * porcentajeIVA;
-    return {
-        baseImponible: baseImponible,
-        iva: iva,
-        total: baseImponible + iva
+
+    const searchRequest: SearchCodeRequest = {
+      query: this.searchQuery,
+      limit: 10
     };
-}`,
-          metadata: {
-            source: 'nsdk_source',
-            file_path: '/modules/facturacion/CALC_IMP.NCL',
-            file_type: 'nsdk_logic'
-          },
-          similarity: 0.94
-        },
-        {
-          id: '2',
-          content: `@Service
-public class TaxCalculationService {
-    
-    public TaxCalculation calculateTax(BigDecimal baseAmount, CustomerType customerType) {
-        BigDecimal taxRate = customerType == CustomerType.BUSINESS ? 
-            new BigDecimal("0.21") : new BigDecimal("0.18");
-        
-        BigDecimal taxAmount = baseAmount.multiply(taxRate);
-        BigDecimal totalAmount = baseAmount.add(taxAmount);
-        
-        return new TaxCalculation(baseAmount, taxAmount, totalAmount);
-    }
-}`,
-          metadata: {
-            source: 'target_code',
-            file_path: '/src/main/java/com/empresa/services/TaxCalculationService.java',
-            file_type: 'java'
-          },
-          similarity: 0.87
-        },
-        {
-          id: '3',
-          content: `## Cálculo de Impuestos
 
-El sistema maneja diferentes tipos de IVA según el tipo de cliente:
-- Empresas: 21%
-- Particulares: 18%
-
-La función recibe la base imponible y devuelve el desglose completo incluyendo IVA y total.`,
+    this.knowledgeService.searchSimilarCode(searchRequest).subscribe({
+      next: (response) => {
+        console.log('Resultados de búsqueda:', response);
+        // Mapear resultados del backend a la interfaz local
+        this.searchResults = response.results.map(result => ({
+          id: result.id || '',
+          content: result.metadata?.content || result.metadata?.file_path || 'Sin contenido',
           metadata: {
-            source: 'documentation',
-            file_path: '/docs/business-rules/tax-calculation.md',
-            file_type: 'markdown'
+            source: result.metadata?.source || 'unknown',
+            file_path: result.metadata?.file_path || '',
+            file_type: result.metadata?.file_type || ''
           },
-          similarity: 0.73
+          similarity: result.score || 0
+        })) as LocalSearchResult[];
+        this.isSearching = false;
+
+        if (this.searchResults.length === 0) {
+          this.snackBar.open('No se encontraron resultados para tu búsqueda', 'Cerrar', {
+            duration: 3000
+          });
         }
-      ];
-      
-      this.isSearching = false;
-    }, 2000);
+      },
+      error: (error) => {
+        console.error('Error en búsqueda:', error);
+        this.isSearching = false;
+        this.snackBar.open('Error en búsqueda: ' + error.message, 'Cerrar', {
+          duration: 5000,
+          panelClass: ['error-snackbar']
+        });
+      }
+    });
   }
 
   loadDocuments() {
@@ -792,7 +848,7 @@ La función recibe la base imponible y devuelve el desglose completo incluyendo 
   }
 
   // Métodos auxiliares
-  trackByResultId(index: number, result: SearchResult): string {
+  trackByResultId(index: number, result: LocalSearchResult): string {
     return result.id;
   }
 
@@ -833,16 +889,30 @@ La función recibe la base imponible y devuelve el desglose completo incluyendo 
 
   // Acciones
   copyToClipboard(content: string) {
-    navigator.clipboard.writeText(content);
-    this.snackBar.open('Código copiado al portapapeles', 'Cerrar', { duration: 2000 });
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(content).then(() => {
+        this.snackBar.open('Código copiado al portapapeles', 'Cerrar', { duration: 2000 });
+      }).catch(() => {
+        this.snackBar.open('Error al copiar al portapapeles', 'Cerrar', { duration: 2000 });
+      });
+    } else {
+      // Fallback para navegadores que no soportan clipboard API
+      const textArea = document.createElement('textarea');
+      textArea.value = content;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      this.snackBar.open('Código copiado al portapapeles', 'Cerrar', { duration: 2000 });
+    }
   }
 
-  findSimilar(result: SearchResult) {
+  findSimilar(result: LocalSearchResult) {
     this.searchQuery = result.content.substring(0, 100) + '...';
     this.performSearch();
   }
 
-  viewResultDetails(result: SearchResult) {
+  viewResultDetails(result: LocalSearchResult) {
     console.log('Viewing details for:', result);
     // Implementar modal con detalles completos
   }

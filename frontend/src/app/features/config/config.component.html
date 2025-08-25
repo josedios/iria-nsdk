@@ -31,7 +31,7 @@
                   <mat-icon matSuffix>business</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-slide-toggle formControlName="isActive" color="primary">
                   Configuración Activa
@@ -62,19 +62,19 @@
                   <mat-icon matSuffix>link</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline">
                   <mat-label>Rama Principal</mat-label>
                   <input matInput formControlName="branch" placeholder="main">
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Usuario</mat-label>
                   <input matInput formControlName="username" placeholder="usuario-git">
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Token de Acceso</mat-label>
@@ -83,9 +83,19 @@
                 </mat-form-field>
               </div>
             </mat-card-content>
+            <div *ngIf="connectionStatus">
+              <div *ngFor="let status of connectionStatus">
+                <ng-container *ngIf="status.service === 'Repositorio Origen (NSDK)'">
+                  <mat-icon [ngClass]="status.status === 'success' ? 'success' : 'error'">
+                    {{ status.status === 'success' ? 'check_circle' : 'error' }}
+                  </mat-icon>
+                  <span [ngClass]="status.status">{{ status.message }}</span>
+                </ng-container>
+              </div>
+            </div>
           </mat-card>
 
-          <!-- Repositorio Destino Frontend -->
+          <!-- Repositorio Frontend (Angular) -->
           <mat-card class="repo-card">
             <mat-card-header>
               <mat-card-title>
@@ -102,19 +112,19 @@
                   <mat-icon matSuffix>link</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline">
                   <mat-label>Rama Principal</mat-label>
                   <input matInput formControlName="branch" placeholder="main">
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Usuario</mat-label>
                   <input matInput formControlName="username" placeholder="usuario-git">
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Token de Acceso</mat-label>
@@ -123,16 +133,27 @@
                 </mat-form-field>
               </div>
             </mat-card-content>
+            <div *ngIf="connectionStatus">
+              <div *ngFor="let status of connectionStatus">
+                <ng-container *ngIf="status.service === 'Repositorio Frontend (Angular)'">
+                  <mat-icon [ngClass]="status.status === 'success' ? 'success' : 'error'">
+                    {{ status.status === 'success' ? 'check_circle' : 'error' }}
+                  </mat-icon>
+                  <span [ngClass]="status.status">{{ status.message }}</span>
+                </ng-container>
+              </div>
+            </div>
           </mat-card>
 
-          <!-- Repositorio Destino Backend -->
+          <!-- Repositorio Backend (Spring Boot) -->
           <mat-card class="repo-card">
             <mat-card-header>
               <mat-card-title>
                 <mat-icon>code</mat-icon>
                 Repositorio Backend (Spring Boot)
               </mat-card-title>
-              <mat-card-subtitle>Configuración del repositorio donde se generará el código Spring Boot</mat-card-subtitle>
+              <mat-card-subtitle>Configuración del repositorio donde se generará el código Spring
+                Boot</mat-card-subtitle>
             </mat-card-header>
             <mat-card-content formGroupName="backendRepo">
               <div class="form-row">
@@ -142,19 +163,19 @@
                   <mat-icon matSuffix>link</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline">
                   <mat-label>Rama Principal</mat-label>
                   <input matInput formControlName="branch" placeholder="main">
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Usuario</mat-label>
                   <input matInput formControlName="username" placeholder="usuario-git">
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Token de Acceso</mat-label>
@@ -163,6 +184,16 @@
                 </mat-form-field>
               </div>
             </mat-card-content>
+            <div *ngIf="connectionStatus">
+              <div *ngFor="let status of connectionStatus">
+                <ng-container *ngIf="status.service === 'Repositorio Backend (Spring Boot)'">
+                  <mat-icon [ngClass]="status.status === 'success' ? 'success' : 'error'">
+                    {{ status.status === 'success' ? 'check_circle' : 'error' }}
+                  </mat-icon>
+                  <span [ngClass]="status.status">{{ status.message }}</span>
+                </ng-container>
+              </div>
+            </div>
           </mat-card>
         </div>
       </mat-tab>
@@ -188,7 +219,7 @@
                     <mat-option value="mistral">Mistral</mat-option>
                   </mat-select>
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Modelo</mat-label>
                   <mat-select formControlName="modelName">
@@ -198,7 +229,7 @@
                   </mat-select>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row" *ngIf="showApiKey">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>API Key</mat-label>
@@ -206,7 +237,7 @@
                   <mat-icon matSuffix>key</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row" *ngIf="showBaseUrl">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>URL Base</mat-label>
@@ -214,14 +245,14 @@
                   <mat-icon matSuffix>link</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline">
                   <mat-label>Temperatura</mat-label>
                   <input matInput type="number" formControlName="temperature" min="0" max="2" step="0.1">
                   <mat-hint>0.0 - 2.0</mat-hint>
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Máximo de Tokens</mat-label>
                   <input matInput type="number" formControlName="maxTokens" min="1" max="8192">
@@ -229,6 +260,16 @@
                 </mat-form-field>
               </div>
             </mat-card-content>
+            <div *ngIf="connectionStatus">
+              <div *ngFor="let status of connectionStatus">
+                <ng-container *ngIf="status.service === 'LLM Provider'">
+                  <mat-icon [ngClass]="status.status === 'success' ? 'success' : 'error'">
+                    {{ status.status === 'success' ? 'check_circle' : 'error' }}
+                  </mat-icon>
+                  <span [ngClass]="status.status">{{ status.message }}</span>
+                </ng-container>
+              </div>
+            </div>
           </mat-card>
         </div>
       </mat-tab>
@@ -254,13 +295,13 @@
                     <mat-option value="chroma">Chroma</mat-option>
                   </mat-select>
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Nombre de la Colección</mat-label>
                   <input matInput formControlName="collectionName" placeholder="nsdk-embeddings">
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row" *ngIf="showConnectionString">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Cadena de Conexión</mat-label>
@@ -268,13 +309,13 @@
                   <mat-icon matSuffix>settings</mat-icon>
                 </mat-form-field>
               </div>
-              
+
               <div class="form-row">
                 <mat-form-field appearance="outline">
                   <mat-label>Modelo de Embedding</mat-label>
                   <input matInput formControlName="embeddingModel" placeholder="text-embedding-ada-002">
                 </mat-form-field>
-                
+
                 <mat-form-field appearance="outline">
                   <mat-label>Dimensión</mat-label>
                   <input matInput type="number" formControlName="dimension" min="128" max="4096">
@@ -282,34 +323,19 @@
                 </mat-form-field>
               </div>
             </mat-card-content>
+            <div *ngIf="connectionStatus">
+              <div *ngFor="let status of connectionStatus">
+                <ng-container *ngIf="status.service === 'Vector Store'">
+                  <mat-icon [ngClass]="status.status === 'success' ? 'success' : 'error'">
+                    {{ status.status === 'success' ? 'check_circle' : 'error' }}
+                  </mat-icon>
+                  <span [ngClass]="status.status">{{ status.message }}</span>
+                </ng-container>
+              </div>
+            </div>
           </mat-card>
         </div>
       </mat-tab>
     </mat-tab-group>
   </form>
-
-  <!-- Estado de Conexiones -->
-  <div class="connection-status" *ngIf="connectionStatus">
-    <mat-card>
-      <mat-card-header>
-        <mat-card-title>Estado de Conexiones</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        <div class="status-item" *ngFor="let status of connectionStatus">
-          <div class="status-content">
-            <mat-icon [class]="'status-icon ' + status.status">
-              {{ status.status === 'success' ? 'check_circle' : 
-                 status.status === 'error' ? 'error' : 'hourglass_empty' }}
-            </mat-icon>
-            <span class="status-service">{{ status.service }}</span>
-            <span class="status-message">{{ status.message }}</span>
-          </div>
-          <mat-progress-spinner *ngIf="status.status === 'testing'" 
-                               mode="indeterminate" 
-                               diameter="20">
-          </mat-progress-spinner>
-        </div>
-      </mat-card-content>
-    </mat-card>
-  </div>
-</div> 
+</div>

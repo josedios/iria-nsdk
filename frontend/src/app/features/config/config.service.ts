@@ -37,4 +37,8 @@ export class ConfigService {
     delete(id: string): Observable<any> {
         return this.http.delete(`${this.apiUrl}/${id}`);
     }
+
+    testConnections(config_data: any) {
+        return this.http.post<any[]>(`${environment.apiUrl}/configurations/test-connections`, { config_data });
+    }
 } 

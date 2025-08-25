@@ -64,14 +64,6 @@ class Configuration(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    def __post_init__(self):
-        if self.id is None:
-            self.id = str(uuid.uuid4())
-        if self.created_at is None:
-            self.created_at = datetime.utcnow()
-        if self.updated_at is None:
-            self.updated_at = datetime.utcnow()
-    
     def update(self):
         """Actualiza la fecha de modificación"""
         self.updated_at = datetime.utcnow()
