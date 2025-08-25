@@ -12,9 +12,25 @@
       </button>
     </div>
   </div>
-  
+
   <div class="modules-content">
-    <mat-card class="modules-tree-card">
+    <!-- Indicador de carga -->
+    <div *ngIf="isLoading" class="loading-container">
+      <mat-spinner diameter="50"></mat-spinner>
+      <p>Cargando módulos desde el backend...</p>
+    </div>
+
+    <!-- Mensaje de error -->
+    <div *ngIf="errorMessage && !isLoading" class="error-message">
+      <mat-icon>error</mat-icon>
+      <p>{{ errorMessage }}</p>
+      <button mat-raised-button color="primary" (click)="loadModulesFromBackend()">
+        Reintentar
+      </button>
+    </div>
+
+    <!-- Árbol de módulos -->
+    <mat-card *ngIf="!isLoading && !errorMessage" class="modules-tree-card">
       <mat-card-header>
         <mat-card-title>Árbol de Módulos y Pantallas</mat-card-title>
         <mat-card-subtitle>{{ getTreeStats() }}</mat-card-subtitle>
@@ -25,39 +41,42 @@
             <div class="tree-node">
               <div class="node-content">
                 <mat-icon class="node-icon" [class]="'node-type-' + node.type">
-                  {{ node.type === 'module' ? 'folder' : 'visibility' }}
+                  {{ getNodeIcon(node.type) }}
                 </mat-icon>
                 <span class="node-name">{{ node.name }}</span>
-                <mat-chip class="status-chip" [class]="'status-' + node.status">
+                <div class="node-info" *ngIf="node.is_file">
+                  <span class="file-size" *ngIf="node.size_kb">{{ node.size_kb }} KB</span>
+                  <span class="line-count" *ngIf="node.line_count">{{ node.line_count }} líneas</span>
+                  <span class="function-count" *ngIf="node.function_count">{{ node.function_count }} funciones</span>
+                  <span class="field-count" *ngIf="node.field_count">{{ node.field_count }} campos</span>
+                  <span class="button-count" *ngIf="node.button_count">{{ node.button_count }} botones</span>
+                </div>
+                <div class="node-info" *ngIf="node.is_dir">
+                  <span class="file-count" *ngIf="node.file_count">{{ node.file_count }} archivos</span>
+                  <span class="dir-count" *ngIf="node.dir_count">{{ node.dir_count }} directorios</span>
+                </div>
+                <mat-chip class="status-chip" [class]="'status-' + node.status" *ngIf="node.status">
                   {{ getStatusLabel(node.status) }}
                 </mat-chip>
               </div>
-              
+
               <div class="node-actions" *ngIf="node.type === 'screen'">
-                <button mat-icon-button 
-                        [matTooltip]="'Analizar pantalla'" 
-                        (click)="analyzeScreen(node)"
-                        [disabled]="node.status === 'analyzing'">
+                <button mat-icon-button [matTooltip]="'Analizar pantalla'" (click)="analyzeScreen(node)"
+                  [disabled]="node.status === 'analyzing'">
                   <mat-icon>analytics</mat-icon>
                 </button>
-                <button mat-icon-button 
-                        [matTooltip]="'Ver análisis'" 
-                        (click)="viewAnalysis(node)"
-                        [disabled]="node.status === 'pending'">
+                <button mat-icon-button [matTooltip]="'Ver análisis'" (click)="viewAnalysis(node)"
+                  [disabled]="node.status === 'pending'">
                   <mat-icon>visibility</mat-icon>
                 </button>
-                <button mat-icon-button 
-                        [matTooltip]="'Generar código'" 
-                        (click)="generateCode(node)"
-                        [disabled]="node.status !== 'analyzed'">
+                <button mat-icon-button [matTooltip]="'Generar código'" (click)="generateCode(node)"
+                  [disabled]="node.status !== 'analyzed'">
                   <mat-icon>code</mat-icon>
                 </button>
-                <button mat-icon-button 
-                        [matMenuTriggerFor]="menu" 
-                        [matTooltip]="'Más opciones'">
+                <button mat-icon-button [matMenuTriggerFor]="menu" [matTooltip]="'Más opciones'">
                   <mat-icon>more_vert</mat-icon>
                 </button>
-                
+
                 <mat-menu #menu="matMenu">
                   <button mat-menu-item (click)="assignDeveloper(node)">
                     <mat-icon>person</mat-icon>
@@ -75,25 +94,24 @@
               </div>
             </div>
           </mat-tree-node>
-          
+
           <mat-tree-node *matTreeNodeDef="let node;when: hasChild" matTreeNodePadding>
             <div class="tree-node">
               <div class="node-content">
-                <button mat-icon-button matTreeNodeToggle
-                        [attr.aria-label]="'Toggle ' + node.name">
+                <button mat-icon-button matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name">
                   <mat-icon class="mat-icon-rtl-mirror">
                     {{ treeControl.isExpanded(node) ? 'expand_more' : 'chevron_right' }}
                   </mat-icon>
                 </button>
                 <mat-icon class="node-icon" [class]="'node-type-' + node.type">
-                  {{ node.type === 'module' ? 'folder' : 'visibility' }}
+                  {{ getNodeIcon(node.type) }}
                 </mat-icon>
                 <span class="node-name">{{ node.name }}</span>
                 <mat-chip class="status-chip" [class]="'status-' + node.status">
                   {{ getStatusLabel(node.status) }}
                 </mat-chip>
               </div>
-              
+
               <div class="node-stats" *ngIf="node.type === 'module'">
                 <span class="stat-item">{{ getModuleScreenCount(node) }} pantallas</span>
                 <span class="stat-item">{{ getModuleProgress(node) }}% completado</span>
@@ -104,4 +122,4 @@
       </mat-card-content>
     </mat-card>
   </div>
-</div> 
+</div>

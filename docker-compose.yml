@@ -34,7 +34,7 @@ services:
       - redis
     volumes:
       - ./backend:/app
-      - /tmp/repositories:/tmp/repositories
+      - repositories_data:/app/repositories
     networks:
       - prompt-maestro-network
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
@@ -144,6 +144,7 @@ volumes:
   postgres_data:
   redis_data:
   qdrant_data:
+  repositories_data:
   prometheus_data:
   grafana_data:
 

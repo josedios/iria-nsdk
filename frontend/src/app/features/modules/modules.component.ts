@@ -1,42 +1,72 @@
-import { Component, OnInit } from '@angular/core';
+import { FlatTreeControl } from '@angular/cdk/tree';
 import { CommonModule } from '@angular/common';
-import { MatTreeModule } from '@angular/material/tree';
-import { MatIconModule } from '@angular/material/icon';
+import { HttpClientModule } from '@angular/common/http';
+import { Component, OnInit } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
-import { MatDialogModule, MatDialog } from '@angular/material/dialog';
-import { MatTabsModule } from '@angular/material/tabs';
 import { MatChipsModule } from '@angular/material/chips';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatMenuModule } from '@angular/material/menu';
-import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
-import { FlatTreeControl } from '@angular/cdk/tree';
-import { MatTreeFlatDataSource, MatTreeFlattener } from '@angular/material/tree';
+import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTabsModule } from '@angular/material/tabs';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatTreeFlatDataSource, MatTreeFlattener, MatTreeModule } from '@angular/material/tree';
+import { ModulesService, NSDKModule, NSDKScreen, RepositoryTreeNode } from './modules.service';
 
 interface ModuleNode {
   name: string;
-  type: 'module' | 'screen';
-  status: 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error';
+  type: 'module' | 'screen' | 'include' | 'program' | 'config' | 'document' | 'other' | 'directory';
+  status?: 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error';
   path: string;
   children?: ModuleNode[];
   id?: string;
   developer?: string;
   complexity?: number;
   estimatedHours?: number;
+  is_file?: boolean;
+  is_dir?: boolean;
+  file_count?: number;
+  dir_count?: number;
+  size_kb?: number;
+  extension?: string;
+  line_count?: number;
+  char_count?: number;
+  function_count?: number;
+  functions?: string[];
+  field_count?: number;
+  fields?: string[];
+  button_count?: number;
+  buttons?: string[];
 }
 
 interface FlatNode {
   expandable: boolean;
   name: string;
-  type: 'module' | 'screen';
-  status: 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error';
+  type: 'module' | 'screen' | 'include' | 'program' | 'config' | 'document' | 'other' | 'directory';
+  status?: 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error';
   level: number;
   path: string;
   id?: string;
   developer?: string;
   complexity?: number;
   estimatedHours?: number;
+  is_file?: boolean;
+  is_dir?: boolean;
+  file_count?: number;
+  dir_count?: number;
+  size_kb?: number;
+  extension?: string;
+  line_count?: number;
+  char_count?: number;
+  function_count?: number;
+  functions?: string[];
+  field_count?: number;
+  fields?: string[];
+  button_count?: number;
+  buttons?: string[];
 }
 
 interface AnalysisData {
@@ -80,13 +110,15 @@ interface AnalysisData {
     MatProgressSpinnerModule,
     MatMenuModule,
     MatTooltipModule,
-    MatDividerModule
+    MatDividerModule,
+    MatSnackBarModule,
+    HttpClientModule
   ],
   templateUrl: './modules.component.html',
   styleUrls: ['./modules.component.scss']
 })
 export class ModulesComponent implements OnInit {
-  
+
   private _transformer = (node: ModuleNode, level: number): FlatNode => {
     return {
       expandable: !!node.children && node.children.length > 0,
@@ -98,7 +130,21 @@ export class ModulesComponent implements OnInit {
       id: node.id,
       developer: node.developer,
       complexity: node.complexity,
-      estimatedHours: node.estimatedHours
+      estimatedHours: node.estimatedHours,
+      is_file: node.is_file,
+      is_dir: node.is_dir,
+      file_count: node.file_count,
+      dir_count: node.dir_count,
+      size_kb: node.size_kb,
+      extension: node.extension,
+      line_count: node.line_count,
+      char_count: node.char_count,
+      function_count: node.function_count,
+      functions: node.functions,
+      field_count: node.field_count,
+      fields: node.fields,
+      button_count: node.button_count,
+      buttons: node.buttons
     };
   };
 
@@ -169,12 +215,234 @@ export class ModulesComponent implements OnInit {
     }
   ];
 
-  constructor(private dialog: MatDialog) {
-    this.dataSource.data = this.TREE_DATA;
+  // Propiedades para datos reales
+  isLoading = false;
+  errorMessage = '';
+
+  constructor(
+    private dialog: MatDialog,
+    private modulesService: ModulesService,
+    private snackBar: MatSnackBar
+  ) {
+    // Inicializar con datos vacíos
+    this.dataSource.data = [];
   }
 
   ngOnInit() {
-    // Inicialización adicional si es necesaria
+    this.loadModulesFromBackend();
+  }
+
+  /**
+   * Carga la estructura del repositorio desde el backend
+   */
+  loadModulesFromBackend() {
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    // Usar el nuevo endpoint del árbol del repositorio
+    this.modulesService.getRepositoryTree('nsdk-sources').subscribe({
+      next: (response) => {
+        // Convertir la estructura del árbol del backend a ModuleNode[]
+        const treeData = this.convertRepositoryTreeToModuleNodes(response.tree);
+        this.dataSource.data = treeData;
+        this.isLoading = false;
+        console.log('Estructura del repositorio cargada desde backend:', response);
+      },
+      error: (error) => {
+        console.error('Error cargando estructura del repositorio:', error);
+        this.errorMessage = 'Error al cargar la estructura del repositorio desde el backend';
+        this.isLoading = false;
+        this.snackBar.open('Error al cargar la estructura del repositorio', 'Cerrar', { duration: 3000 });
+      }
+    });
+  }
+
+  /**
+   * Convierte datos del backend al formato del árbol
+   */
+  convertBackendDataToTree(modules: NSDKModule[], screens: NSDKScreen[]): ModuleNode[] {
+    const treeData: ModuleNode[] = [];
+
+    // Agrupar pantallas por módulo
+    const screensByModule = new Map<string, NSDKScreen[]>();
+    screens.forEach(screen => {
+      const moduleName = this.extractModuleNameFromPath(screen.file_path);
+      if (!screensByModule.has(moduleName)) {
+        screensByModule.set(moduleName, []);
+      }
+      screensByModule.get(moduleName)!.push(screen);
+    });
+
+    // Crear nodos de módulos
+    modules.forEach(module => {
+      const moduleNode: ModuleNode = {
+        name: module.name,
+        type: 'module',
+        status: 'analyzed', // Por defecto
+        path: module.file_path,
+        children: []
+      };
+
+      // Agregar pantallas del módulo
+      const moduleScreens = screensByModule.get(module.name) || [];
+      moduleScreens.forEach(screen => {
+        const screenNode: ModuleNode = {
+          name: screen.file_name,
+          type: 'screen',
+          status: 'analyzed', // Por defecto
+          path: screen.file_path,
+          id: screen.name,
+          developer: 'Sistema',
+          complexity: this.calculateComplexity(screen),
+          estimatedHours: this.estimateHours(screen)
+        };
+        moduleNode.children!.push(screenNode);
+      });
+
+      treeData.push(moduleNode);
+    });
+
+    return treeData;
+  }
+
+  /**
+   * Convierte la estructura del árbol del repositorio a ModuleNode[]
+   */
+  convertRepositoryTreeToModuleNodes(treeNode: RepositoryTreeNode): ModuleNode[] {
+    if (!treeNode.children || treeNode.children.length === 0) {
+      return [];
+    }
+
+    return treeNode.children.map(child => this.convertTreeNodeToModuleNode(child));
+  }
+
+  /**
+   * Convierte un nodo del árbol del repositorio a ModuleNode
+   */
+  private convertTreeNodeToModuleNode(treeNode: RepositoryTreeNode): ModuleNode {
+    const moduleNode: ModuleNode = {
+      name: treeNode.name,
+      type: treeNode.type,
+      path: treeNode.path,
+      is_file: treeNode.is_file,
+      is_dir: treeNode.is_dir,
+      file_count: treeNode.file_count,
+      dir_count: treeNode.dir_count,
+      size_kb: treeNode.size_kb,
+      extension: treeNode.extension,
+      line_count: treeNode.line_count,
+      char_count: treeNode.char_count,
+      function_count: treeNode.function_count,
+      functions: treeNode.functions,
+      field_count: treeNode.field_count,
+      fields: treeNode.fields,
+      button_count: treeNode.button_count,
+      buttons: treeNode.buttons,
+      children: []
+    };
+
+    // Convertir recursivamente los hijos
+    if (treeNode.children && treeNode.children.length > 0) {
+      moduleNode.children = treeNode.children.map(child => this.convertTreeNodeToModuleNode(child));
+    }
+
+    // Agregar información adicional según el tipo
+    if (treeNode.type === 'module') {
+      moduleNode.status = 'analyzed';
+      moduleNode.complexity = this.calculateComplexityFromTreeNode(treeNode);
+      moduleNode.estimatedHours = this.estimateHoursFromTreeNode(treeNode);
+    } else if (treeNode.type === 'screen') {
+      moduleNode.status = 'analyzed';
+      moduleNode.complexity = this.calculateComplexityFromTreeNode(treeNode);
+      moduleNode.estimatedHours = this.estimateHoursFromTreeNode(treeNode);
+    } else if (treeNode.type === 'directory') {
+      moduleNode.status = 'pending';
+    }
+
+    return moduleNode;
+  }
+
+  /**
+   * Calcula la complejidad basada en la información del nodo del árbol
+   */
+  private calculateComplexityFromTreeNode(node: RepositoryTreeNode): number {
+    let complexity = 1.0;
+
+    if (node.field_count) complexity += node.field_count * 0.1;
+    if (node.button_count) complexity += node.button_count * 0.2;
+    if (node.line_count) complexity += node.line_count * 0.01;
+    if (node.function_count) complexity += node.function_count * 0.15;
+
+    return Math.min(5.0, Math.round(complexity * 10) / 10);
+  }
+
+  /**
+   * Estima las horas de desarrollo basado en la información del nodo del árbol
+   */
+  private estimateHoursFromTreeNode(node: RepositoryTreeNode): number {
+    const baseHours = 2;
+    const fieldHours = (node.field_count || 0) * 0.5;
+    const buttonHours = (node.button_count || 0) * 0.3;
+    const functionHours = (node.function_count || 0) * 0.8;
+    const complexityHours = this.calculateComplexityFromTreeNode(node) * 1.5;
+
+    return Math.round(baseHours + fieldHours + buttonHours + functionHours + complexityHours);
+  }
+
+  /**
+   * Obtiene el icono apropiado para el tipo de nodo
+   */
+  getNodeIcon(type: string): string {
+    switch (type) {
+      case 'directory':
+        return 'folder';
+      case 'module':
+        return 'code';
+      case 'screen':
+        return 'visibility';
+      case 'include':
+        return 'link';
+      case 'program':
+        return 'terminal';
+      case 'config':
+        return 'settings';
+      case 'document':
+        return 'description';
+      case 'other':
+        return 'insert_drive_file';
+      default:
+        return 'help';
+    }
+  }
+
+  /**
+   * Extrae el nombre del módulo de la ruta del archivo
+   */
+  extractModuleNameFromPath(filePath: string): string {
+    const parts = filePath.split('/');
+    return parts.length > 1 ? parts[1] : 'General';
+  }
+
+  /**
+   * Calcula la complejidad de una pantalla
+   */
+  calculateComplexity(screen: NSDKScreen): number {
+    let complexity = 1.0;
+    complexity += screen.field_count * 0.1;
+    complexity += screen.button_count * 0.2;
+    complexity += screen.line_count * 0.01;
+    return Math.min(5.0, Math.round(complexity * 10) / 10);
+  }
+
+  /**
+   * Estima las horas de desarrollo
+   */
+  estimateHours(screen: NSDKScreen): number {
+    const baseHours = 2;
+    const fieldHours = screen.field_count * 0.5;
+    const buttonHours = screen.button_count * 0.3;
+    const complexityHours = this.calculateComplexity(screen) * 1.5;
+    return Math.round(baseHours + fieldHours + buttonHours + complexityHours);
   }
 
   hasChild = (_: number, node: FlatNode) => node.expandable;
@@ -221,23 +489,50 @@ export class ModulesComponent implements OnInit {
   getModuleProgress(node: FlatNode): number {
     const moduleNode = this.TREE_DATA.find(n => n.name === node.name);
     if (!moduleNode?.children) return 0;
-    
+
     const totalScreens = moduleNode.children.length;
-    const completedScreens = moduleNode.children.filter(screen => 
+    const completedScreens = moduleNode.children.filter(screen =>
       screen.status === 'generated' || screen.status === 'analyzed'
     ).length;
-    
+
     return Math.round((completedScreens / totalScreens) * 100);
   }
 
   refreshModules() {
-    console.log('Actualizando módulos...');
-    // Aquí iría la lógica para actualizar los módulos
+    console.log('Actualizando módulos desde backend...');
+    this.loadModulesFromBackend();
+    this.snackBar.open('Módulos actualizados', 'Cerrar', { duration: 2000 });
   }
 
   vectorizeCode() {
-    console.log('Vectorizando código...');
-    // Aquí iría la lógica para vectorizar el código
+    console.log('Iniciando vectorización de código...');
+
+    // Por ahora, vectorizamos el repositorio nsdk-sources
+    const repoUrl = 'https://repo.plexus.services/jose.diosotero/nsdk-sources.git';
+
+    this.modulesService.vectorizeRepository(repoUrl, 'main').subscribe({
+      next: (response) => {
+        console.log('Vectorización iniciada:', response);
+        this.snackBar.open(
+          `Vectorización iniciada. Batch ID: ${response.batch_id}`,
+          'Cerrar',
+          { duration: 5000 }
+        );
+
+        // Recargar módulos después de un delay
+        setTimeout(() => {
+          this.loadModulesFromBackend();
+        }, 3000);
+      },
+      error: (error) => {
+        console.error('Error en vectorización:', error);
+        this.snackBar.open(
+          'Error al iniciar vectorización',
+          'Cerrar',
+          { duration: 5000 }
+        );
+      }
+    });
   }
 
   analyzeScreen(node: FlatNode) {
@@ -273,7 +568,7 @@ export class ModulesComponent implements OnInit {
 
   openAnalysisModal(node: FlatNode) {
     const analysisData = this.getMockAnalysisData();
-    
+
     this.dialog.open(AnalysisModalComponent, {
       width: '90vw',
       height: '90vh',
@@ -384,8 +679,8 @@ export class ModulesComponent implements OnInit {
 }
 
 // Componente del modal de análisis
-import { MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { Inject } from '@angular/core';
+import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 
 @Component({
   selector: 'app-analysis-modal',
@@ -632,7 +927,7 @@ export class AnalysisModalComponent {
   constructor(
     public dialogRef: MatDialogRef<AnalysisModalComponent>,
     @Inject(MAT_DIALOG_DATA) public data: any
-  ) {}
+  ) { }
 
   getSqlTypeColor(type: string): string {
     const colors = {

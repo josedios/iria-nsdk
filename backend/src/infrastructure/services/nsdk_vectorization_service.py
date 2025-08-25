@@ -11,15 +11,18 @@ from ...domain.entities.nsdk_file import NSDKFile, NSDKFileType, NSDKFileStatus
 from ...domain.entities.vectorization_batch import VectorizationBatch, VectorizationBatchStatus, VectorizationBatchType
 from .vector_store_service_impl import VectorStoreServiceImpl
 from .llm_service_impl import LLMServiceImpl
+from .repository_manager_service import RepositoryManagerService
 
 logger = logging.getLogger(__name__)
 
 class NSDKVectorizationService:
     """Servicio para vectorizar archivos NSDK (.SCR, .NCL, .INC, .PRG)"""
     
-    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl):
+    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl, 
+                 repository_manager: RepositoryManagerService):
         self.vector_store_service = vector_store_service
         self.llm_service = llm_service
+        self.repository_manager = repository_manager
         
         # Almacenamiento en memoria para lotes (temporal)
         self._batches: Dict[str, VectorizationBatch] = {}
@@ -73,31 +76,43 @@ class NSDKVectorizationService:
                 source_repo_branch=branch
             )
             
-            # Clonar repositorio
-            temp_dir = self._clone_repository(repo_url, branch, username, token)
+            # Obtener nombre del repositorio de la URL
+            repo_name = repo_url.split('/')[-1].replace('.git', '')
             
-            try:
-                # Encontrar archivos NSDK
-                nsdk_files = self._discover_nsdk_files(temp_dir)
-                logger.info(f"Encontrados {len(nsdk_files)} archivos NSDK")
-                
-                # Añadir archivos al lote
-                for file_path in nsdk_files:
-                    file_id = str(hash(file_path))
-                    batch.add_file(file_id)
-                
-                # Procesar archivos
-                batch.start_processing()
-                self._process_files_batch(nsdk_files, batch)
-                
-                if batch.failed_files:
-                    batch.fail_processing(f"Fallaron {len(batch.failed_files)} archivos")
-                else:
-                    batch.complete_processing()
-                    
-            finally:
-                # Limpiar directorio temporal
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            # Clonar o actualizar repositorio permanentemente
+            logger.info(f"Clonando/actualizando repositorio: {repo_url} (branch: {branch})")
+            repo_path = self.repository_manager.clone_repository(repo_url, repo_name, branch, username, token)
+            logger.info(f"Repositorio disponible en: {repo_path}")
+            
+            # Encontrar archivos NSDK
+            logger.info(f"Buscando archivos NSDK en: {repo_path}")
+            nsdk_files = self._discover_nsdk_files(str(repo_path))
+            logger.info(f"Encontrados {len(nsdk_files)} archivos NSDK")
+            if nsdk_files:
+                logger.info(f"Primeros 5 archivos: {nsdk_files[:5]}")
+            
+            # Añadir archivos al lote
+            for file_path in nsdk_files:
+                file_id = str(hash(file_path))
+                batch.add_file(file_id)
+            
+            # Procesar archivos
+            logger.info(f"Iniciando procesamiento del lote {batch.id}")
+            batch.start_processing()
+            logger.info(f"Estado del lote después de start_processing: {batch.status.value}")
+            
+            await self._process_files_batch(nsdk_files, batch)
+            logger.info(f"Estado del lote después de _process_files_batch: {batch.status.value}")
+            logger.info(f"Archivos procesados: {batch.processed_files}, Exitosos: {batch.successful_files}, Fallidos: {batch.failed_files}")
+            
+            if batch.failed_files:
+                logger.warning(f"Fallaron {len(batch.failed_files)} archivos, marcando lote como fallido")
+                batch.fail_processing(f"Fallaron {len(batch.failed_files)} archivos")
+            else:
+                logger.info("Todos los archivos procesados exitosamente, marcando lote como completado")
+                batch.complete_processing()
+            
+            logger.info(f"Estado final del lote: {batch.status.value}")
             
             # Almacenar el lote en memoria
             self._batches[batch.id] = batch
@@ -152,7 +167,7 @@ class NSDKVectorizationService:
                     batch.add_file(file_id)
                 
                 batch.start_processing()
-                self._process_files_batch(module_files, batch)
+                await self._process_files_batch(module_files, batch)
                 
                 if batch.failed_files:
                     batch.fail_processing(f"Fallaron {len(batch.failed_files)} archivos")
@@ -223,7 +238,10 @@ class NSDKVectorizationService:
         else:
             search_path = root_path
         
+        logger.info(f"Buscando archivos NSDK en: {search_path}")
+        
         if not search_path.exists():
+            logger.warning(f"El directorio de búsqueda no existe: {search_path}")
             return []
         
         # Buscar archivos NSDK recursivamente
@@ -232,32 +250,43 @@ class NSDKVectorizationService:
                 for file_type, pattern in self.nsdk_file_patterns.items():
                     if re.search(pattern, file_path.name):
                         nsdk_files.append(str(file_path))
+                        logger.debug(f"Archivo NSDK encontrado: {file_path.name} (tipo: {file_type})")
                         break
         
+        logger.info(f"Total de archivos NSDK encontrados: {len(nsdk_files)}")
         return nsdk_files
     
     async def _process_files_batch(self, file_paths: List[str], batch: VectorizationBatch):
         """Procesa un lote de archivos NSDK"""
-        for file_path in file_paths:
+        logger.info(f"Iniciando procesamiento de {len(file_paths)} archivos NSDK")
+        
+        for i, file_path in enumerate(file_paths):
             try:
+                logger.info(f"Procesando archivo {i+1}/{len(file_paths)}: {file_path}")
                 file_id = str(hash(file_path))
                 
                 # Crear entidad NSDKFile
                 nsdk_file = self._create_nsdk_file(file_path)
+                logger.info(f"Archivo NSDK creado: {nsdk_file.name} (tipo: {nsdk_file.file_type.value})")
                 
                 # Procesar contenido
                 self._process_nsdk_file(nsdk_file)
+                logger.info(f"Contenido procesado para {nsdk_file.name}")
                 
                 # Vectorizar
                 await self._vectorize_nsdk_file(nsdk_file)
+                logger.info(f"Vectorización completada para {nsdk_file.name}")
                 
                 # Marcar como procesado exitosamente
                 batch.mark_file_processed(file_id, success=True)
+                logger.info(f"Archivo {nsdk_file.name} marcado como procesado exitosamente")
                 
             except Exception as e:
                 logger.error(f"Error procesando archivo {file_path}: {str(e)}")
                 file_id = str(hash(file_path))
                 batch.mark_file_processed(file_id, success=False)
+        
+        logger.info(f"Procesamiento de lote completado. Total: {len(file_paths)}, Exitosos: {batch.successful_files}, Fallidos: {batch.failed_files}")
     
     def _create_nsdk_file(self, file_path: str) -> NSDKFile:
         """Crea una entidad NSDKFile a partir de la ruta del archivo"""
@@ -403,15 +432,46 @@ class NSDKVectorizationService:
             return []
     
     def get_vectorization_stats(self) -> Dict[str, Any]:
-        """Obtiene estadísticas de vectorización"""
-        # TODO: Implementar estadísticas desde la base de datos
-        return {
-            'total_files': 0,
-            'vectorized_files': 0,
-            'pending_files': 0,
-            'error_files': 0,
-            'last_vectorization': None
-        }
+        """Obtiene estadísticas de vectorización basadas en lotes procesados"""
+        try:
+            total_files = 0
+            vectorized_files = 0
+            pending_files = 0
+            error_files = 0
+            last_vectorization = None
+            
+            # Calcular estadísticas desde los lotes almacenados
+            for batch in self._batches.values():
+                total_files += batch.total_files
+                if batch.status == VectorizationBatchStatus.COMPLETED:
+                    vectorized_files += batch.successful_files
+                    error_files += batch.failed_files
+                elif batch.status == VectorizationBatchStatus.IN_PROGRESS:
+                    pending_files += batch.total_files - batch.processed_files
+                elif batch.status == VectorizationBatchStatus.FAILED:
+                    error_files += batch.total_files
+                
+                # Encontrar la última vectorización
+                if batch.completed_at and (last_vectorization is None or batch.completed_at > last_vectorization):
+                    last_vectorization = batch.completed_at
+            
+            return {
+                'total_files': total_files,
+                'vectorized_files': vectorized_files,
+                'pending_files': pending_files,
+                'error_files': error_files,
+                'last_vectorization': last_vectorization.isoformat() if last_vectorization else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {str(e)}")
+            return {
+                'total_files': 0,
+                'vectorized_files': 0,
+                'pending_files': 0,
+                'error_files': 0,
+                'last_vectorization': None
+            }
     
     def get_batch_by_id(self, batch_id: str) -> Optional[VectorizationBatch]:
         """

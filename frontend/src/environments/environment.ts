@@ -1,6 +1,6 @@
 export const environment = {
   production: false,
-  apiUrl: 'http://localhost:8000',
+  apiUrl: 'http://localhost:8001',
   title: 'Iria - NSDK Migration Platform - Migración NSDK',
   version: '1.0.0',
   features: {

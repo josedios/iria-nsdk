@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
@@ -8,8 +9,45 @@ from .database import get_db
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from .application.use_cases.test_connections_use_case import TestConnectionsUseCase
+from .infrastructure.services.repository_manager_service import RepositoryManagerService
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Para consola
+        logging.FileHandler('backend.log')  # Para archivo
+    ]
+)
+
+# Log de prueba para verificar que funciona
+logger = logging.getLogger(__name__)
+logger.info("=== BACKEND INICIADO - LOGGING CONFIGURADO ===")
 
 app = FastAPI(title="Prompt Maestro Backend API")
+
+@app.get("/test-logging", tags=["Test"])
+def test_logging():
+    """Endpoint de prueba para verificar que el logging funciona"""
+    print("=== TEST PRINT ===")
+    logger.info("=== TEST LOGGER INFO ===")
+    logger.warning("=== TEST LOGGER WARNING ===")
+    logger.error("=== TEST LOGGER ERROR ===")
+    return {"message": "Logging test completed", "status": "success"}
+
+@app.get("/test-simple", tags=["Test"])
+def test_simple():
+    """Endpoint de prueba simple"""
+    print("=== TEST SIMPLE PRINT ===")
+    return {"message": "Simple test works", "status": "success"}
+
+@app.get("/test-error", tags=["Test"])
+def test_error():
+    """Endpoint de prueba que genera un error"""
+    print("=== TEST ERROR PRINT ===")
+    logger.error("=== TEST ERROR LOGGER ===")
+    raise HTTPException(status_code=500, detail="Test error")
 
 # Permitir CORS para desarrollo
 app.add_middleware(
@@ -22,6 +60,9 @@ app.add_middleware(
 
 # Instancia del repositorio
 config_repo = ConfigurationRepositoryImpl()
+
+# Instancia del servicio de gestión de repositorios
+repo_manager = RepositoryManagerService()
 
 class TestConnectionsRequest(BaseModel):
     config_data: Dict[str, Any]
@@ -105,7 +146,7 @@ from .infrastructure.services.llm_service_impl import LLMServiceImpl
 # Instanciar servicios
 vector_store_service = VectorStoreServiceImpl()
 llm_service = LLMServiceImpl()
-nsdk_vectorization_service = NSDKVectorizationService(vector_store_service, llm_service)
+nsdk_vectorization_service = NSDKVectorizationService(vector_store_service, llm_service, repo_manager)
 vectorization_use_case = VectorizationUseCase(nsdk_vectorization_service)
 
 class VectorizeRepositoryRequest(BaseModel):
@@ -126,13 +167,27 @@ class SearchCodeRequest(BaseModel):
 @app.post("/vectorize/repository", tags=["Vectorización"])
 async def vectorize_repository(request: VectorizeRepositoryRequest):
     """Vectorizar un repositorio completo de NSDK"""
+    print("=== INICIANDO VECTORIZACIÓN DE REPOSITORIO ===")
+    print(f"URL: {request.repo_url}")
+    print(f"Branch: {request.branch}")
+    print(f"Username: {request.username}")
+    
+    logger.info(f"=== INICIANDO VECTORIZACIÓN DE REPOSITORIO ===")
+    logger.info(f"URL: {request.repo_url}")
+    logger.info(f"Branch: {request.branch}")
+    logger.info(f"Username: {request.username}")
+    
     try:
+        print("Llamando a vectorization_use_case.vectorize_repository...")
+        logger.info("Llamando a vectorization_use_case.vectorize_repository...")
         batch = await vectorization_use_case.vectorize_repository(
             repo_url=request.repo_url,
             branch=request.branch,
             username=request.username,
             token=request.token
         )
+        print(f"Vectorización iniciada exitosamente. Batch ID: {batch.id}")
+        logger.info(f"Vectorización iniciada exitosamente. Batch ID: {batch.id}")
         return {
             "status": "started",
             "batch_id": batch.id,
@@ -140,6 +195,8 @@ async def vectorize_repository(request: VectorizeRepositoryRequest):
             "total_files": batch.total_files
         }
     except Exception as e:
+        print(f"Error en vectorización: {str(e)}")
+        logger.error(f"Error en vectorización: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en vectorización: {str(e)}")
 
 @app.post("/vectorize/module", tags=["Vectorización"])
@@ -163,10 +220,14 @@ async def vectorize_module(request: VectorizeModuleRequest):
 @app.get("/vectorize/stats", tags=["Vectorización"])
 def get_vectorization_stats():
     """Obtener estadísticas de vectorización"""
+    logger.info("=== SOLICITANDO ESTADÍSTICAS DE VECTORIZACIÓN ===")
     try:
+        logger.info("Llamando a vectorization_use_case.get_vectorization_stats...")
         stats = vectorization_use_case.get_vectorization_stats()
+        logger.info(f"Estadísticas obtenidas: {stats}")
         return stats
     except Exception as e:
+        logger.error(f"Error obteniendo estadísticas: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}")
 
 @app.post("/vectorize/search", tags=["Vectorización"])
@@ -214,8 +275,53 @@ def cancel_batch(batch_id: str):
 # --- ENDPOINTS DE MÓDULOS Y PANTALLAS ---
 @app.get("/modules", tags=["Módulos"])
 def get_modules():
-    """Listar todos los módulos"""
-    return []
+    """Listar todos los módulos de todos los repositorios"""
+    try:
+        # Obtener lista de repositorios
+        repositories = repo_manager.list_repositories()
+        
+        all_modules = []
+        for repo in repositories:
+            repo_name = repo['name']
+            modules = repo_manager.get_nsdk_modules(repo_name)
+            
+            # Agregar información del repositorio a cada módulo
+            for module in modules:
+                module['repository'] = repo_name
+                module['repository_info'] = repo
+            
+            all_modules.extend(modules)
+        
+        logger.info(f"Encontrados {len(all_modules)} módulos en total")
+        return {
+            "total_modules": len(all_modules),
+            "modules": all_modules,
+            "repositories": repositories
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo módulos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo módulos: {str(e)}")
+
+@app.get("/repository-tree/{repo_name}", tags=["Estructura del Repositorio"])
+def get_repository_tree(repo_name: str):
+    """Obtener la estructura de árbol completa de un repositorio"""
+    try:
+        tree = repo_manager.get_repository_tree(repo_name)
+        if not tree:
+            raise HTTPException(status_code=404, detail=f"Repositorio {repo_name} no encontrado")
+        
+        logger.info(f"Árbol del repositorio {repo_name} obtenido exitosamente")
+        return {
+            "repository_name": repo_name,
+            "tree": tree
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error obteniendo árbol del repositorio {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo árbol del repositorio: {str(e)}")
 
 @app.get("/modules/{module_id}", tags=["Módulos"])
 def get_module(module_id: str):
@@ -230,8 +336,33 @@ def get_module_screens(module_id: str):
 # --- ENDPOINTS DE PANTALLAS ---
 @app.get("/screens", tags=["Pantallas"])
 def get_screens():
-    """Listar todas las pantallas"""
-    return []
+    """Listar todas las pantallas de todos los repositorios"""
+    try:
+        # Obtener lista de repositorios
+        repositories = repo_manager.list_repositories()
+        
+        all_screens = []
+        for repo in repositories:
+            repo_name = repo['name']
+            screens = repo_manager.get_nsdk_screens(repo_name)
+            
+            # Agregar información del repositorio a cada pantalla
+            for screen in screens:
+                screen['repository'] = repo_name
+                screen['repository_info'] = repo
+            
+            all_screens.extend(screens)
+        
+        logger.info(f"Encontradas {len(all_screens)} pantallas en total")
+        return {
+            "total_screens": len(all_screens),
+            "screens": all_screens,
+            "repositories": repositories
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo pantallas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo pantallas: {str(e)}")
 
 @app.get("/screens/{screen_id}", tags=["Pantallas"])
 def get_screen(screen_id: str):
