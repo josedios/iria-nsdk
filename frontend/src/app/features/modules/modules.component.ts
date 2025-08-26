@@ -14,7 +14,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatTreeFlatDataSource, MatTreeFlattener, MatTreeModule } from '@angular/material/tree';
-import { ModulesService, NSDKModule, NSDKScreen, RepositoryTreeNode } from './modules.service';
+import { ModulesService, NSDKModule, NSDKScreen, RepositoryTreeNode, NSDKAnalysis, AnalysisStatus } from './modules.service';
 
 interface ModuleNode {
   name: string;
@@ -219,6 +219,12 @@ export class ModulesComponent implements OnInit {
   isLoading = false;
   errorMessage = '';
 
+  // Propiedades para datos de análisis NSDK
+  nsdkAnalyses: NSDKAnalysis[] = [];
+  analysisStatus: AnalysisStatus | null = null;
+  isLoadingAnalysis = false;
+  analysisErrorMessage = '';
+
   constructor(
     private dialog: MatDialog,
     private modulesService: ModulesService,
@@ -239,127 +245,235 @@ export class ModulesComponent implements OnInit {
     this.isLoading = true;
     this.errorMessage = '';
 
-    // Usar el nuevo endpoint del árbol del repositorio
+    // Usar getRepositoryTree que es mucho más rápido que syncRepositoryAnalysis
+    this.loadRepositoryTree();
+  }
+
+  /**
+   * Carga la estructura del árbol del repositorio
+   */
+  loadRepositoryTree() {
+    this.isLoading = true;
+    this.errorMessage = '';
+
     this.modulesService.getRepositoryTree('nsdk-sources').subscribe({
       next: (response) => {
-        // Convertir la estructura del árbol del backend a ModuleNode[]
-        const treeData = this.convertRepositoryTreeToModuleNodes(response.tree);
+        console.log('Árbol del repositorio cargado:', response);
+        
+        // Convertir la respuesta del árbol a ModuleNode[]
+        const treeData = this.convertTreeToModuleNodes(response.tree);
         this.dataSource.data = treeData;
         this.isLoading = false;
-        console.log('Estructura del repositorio cargada desde backend:', response);
+        
+        // Opcionalmente, cargar análisis en segundo plano para estadísticas
+        this.loadAnalysisInBackground();
       },
       error: (error) => {
-        console.error('Error cargando estructura del repositorio:', error);
-        this.errorMessage = 'Error al cargar la estructura del repositorio desde el backend';
+        console.error('Error cargando árbol del repositorio:', error);
+        this.errorMessage = 'Error al cargar la estructura del repositorio';
         this.isLoading = false;
-        this.snackBar.open('Error al cargar la estructura del repositorio', 'Cerrar', { duration: 3000 });
+        
+        // Fallback: intentar cargar análisis existentes
+        this.loadAnalysisFromDatabase();
       }
     });
   }
 
   /**
-   * Convierte datos del backend al formato del árbol
+   * Convierte un RepositoryTreeNode a ModuleNode[]
    */
-  convertBackendDataToTree(modules: NSDKModule[], screens: NSDKScreen[]): ModuleNode[] {
-    const treeData: ModuleNode[] = [];
-
-    // Agrupar pantallas por módulo
-    const screensByModule = new Map<string, NSDKScreen[]>();
-    screens.forEach(screen => {
-      const moduleName = this.extractModuleNameFromPath(screen.file_path);
-      if (!screensByModule.has(moduleName)) {
-        screensByModule.set(moduleName, []);
-      }
-      screensByModule.get(moduleName)!.push(screen);
-    });
-
-    // Crear nodos de módulos
-    modules.forEach(module => {
-      const moduleNode: ModuleNode = {
-        name: module.name,
-        type: 'module',
-        status: 'analyzed', // Por defecto
-        path: module.file_path,
-        children: []
-      };
-
-      // Agregar pantallas del módulo
-      const moduleScreens = screensByModule.get(module.name) || [];
-      moduleScreens.forEach(screen => {
-        const screenNode: ModuleNode = {
-          name: screen.file_name,
-          type: 'screen',
-          status: 'analyzed', // Por defecto
-          path: screen.file_path,
-          id: screen.name,
-          developer: 'Sistema',
-          complexity: this.calculateComplexity(screen),
-          estimatedHours: this.estimateHours(screen)
+  convertTreeToModuleNodes(treeNode: RepositoryTreeNode): ModuleNode[] {
+    const result: ModuleNode[] = [];
+    
+    if (treeNode.children && treeNode.children.length > 0) {
+      for (const child of treeNode.children) {
+        const moduleNode: ModuleNode = {
+          name: child.name,
+          type: child.type,
+          path: child.path,
+          is_file: child.is_file,
+          is_dir: child.is_dir,
+          file_count: child.file_count,
+          dir_count: child.dir_count,
+          size_kb: child.size_kb,
+          extension: child.extension,
+          line_count: child.line_count,
+          char_count: child.char_count,
+          function_count: child.function_count,
+          functions: child.functions || [],
+          field_count: child.field_count,
+          fields: child.fields || [],
+          button_count: child.button_count,
+          buttons: child.buttons || [],
+          status: 'analyzed' // Asumimos que si está en el árbol, ya está analizado
         };
-        moduleNode.children!.push(screenNode);
-      });
+        
+        if (child.children && child.children.length > 0) {
+          moduleNode.children = this.convertTreeToModuleNodes(child);
+        }
+        
+        result.push(moduleNode);
+      }
+    }
+    
+    return result;
+  }
 
-      treeData.push(moduleNode);
+  /**
+   * Carga análisis en segundo plano para estadísticas
+   */
+  loadAnalysisInBackground() {
+    this.modulesService.getRepositoryAnalysisStatus('nsdk-sources').subscribe({
+      next: (status) => {
+        this.analysisStatus = status;
+        console.log('Estado del análisis cargado en segundo plano:', status);
+      },
+      error: (error) => {
+        console.log('No se pudo cargar el estado del análisis en segundo plano:', error);
+      }
     });
+  }
 
+  /**
+   * Sincroniza el análisis del repositorio con la base de datos
+   * (Método mantenido para uso manual si es necesario)
+   */
+  syncAnalysisWithDatabase() {
+    this.isLoadingAnalysis = true;
+    this.analysisErrorMessage = '';
+
+    this.modulesService.syncRepositoryAnalysis('nsdk-sources').subscribe({
+      next: (response) => {
+        console.log('Análisis sincronizado:', response);
+        this.isLoadingAnalysis = false;
+        
+        // Recargar el árbol después de la sincronización
+        this.loadRepositoryTree();
+      },
+      error: (error) => {
+        console.error('Error sincronizando análisis:', error);
+        this.analysisErrorMessage = 'Error al sincronizar el análisis del repositorio';
+        this.isLoadingAnalysis = false;
+      }
+    });
+  }
+
+  /**
+   * Carga los datos de análisis desde la base de datos
+   * (Método mantenido como fallback)
+   */
+  loadAnalysisFromDatabase() {
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    // Obtener estado del análisis
+    this.modulesService.getRepositoryAnalysisStatus('nsdk-sources').subscribe({
+      next: (status) => {
+        this.analysisStatus = status;
+        console.log('Estado del análisis:', status);
+        
+        // Cargar todos los análisis
+        this.modulesService.getRepositoryAnalysis('nsdk-sources').subscribe({
+          next: (response) => {
+            this.nsdkAnalyses = response.analyses;
+            console.log('Análisis cargados desde BD:', response);
+            
+            // Convertir a estructura de árbol para el componente
+            const treeData = this.convertAnalysesToTreeNodes(response.analyses);
+            this.dataSource.data = treeData;
+            this.isLoading = false;
+          },
+          error: (error) => {
+            console.error('Error cargando análisis desde BD:', error);
+            this.errorMessage = 'Error al cargar análisis desde la base de datos';
+            this.isLoading = false;
+          }
+        });
+      },
+      error: (error) => {
+        console.error('Error obteniendo estado del análisis:', error);
+        this.errorMessage = 'Error al obtener el estado del análisis';
+        this.isLoading = false;
+      }
+    });
+  }
+
+  /**
+   * Convierte análisis NSDK a nodos de árbol
+   */
+  convertAnalysesToTreeNodes(analyses: NSDKAnalysis[]): ModuleNode[] {
+    const treeData: ModuleNode[] = [];
+    
+    // Agrupar por directorio
+    const filesByDirectory = new Map<string, NSDKAnalysis[]>();
+    
+    for (const analysis of analyses) {
+      const pathParts = analysis.file_path.split('/');
+      const directory = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : '.';
+      
+      if (!filesByDirectory.has(directory)) {
+        filesByDirectory.set(directory, []);
+      }
+      filesByDirectory.get(directory)!.push(analysis);
+    }
+    
+    // Crear nodos de directorio
+    for (const [directory, files] of filesByDirectory) {
+      if (directory === '.') {
+        // Archivos en la raíz
+        for (const file of files) {
+          const fileNode = this.convertAnalysisToModuleNode(file);
+          treeData.push(fileNode);
+        }
+      } else {
+        // Crear nodo de directorio
+        const dirNode: ModuleNode = {
+          name: directory.split('/').pop() || directory,
+          type: 'directory',
+          path: directory,
+          is_file: false,
+          is_dir: true,
+          file_count: files.length,
+          dir_count: 0,
+          children: []
+        };
+        
+        // Agregar archivos como hijos
+        for (const file of files) {
+          const fileNode = this.convertAnalysisToModuleNode(file);
+          dirNode.children!.push(fileNode);
+        }
+        
+        treeData.push(dirNode);
+      }
+    }
+    
     return treeData;
   }
 
   /**
-   * Convierte la estructura del árbol del repositorio a ModuleNode[]
+   * Convierte un análisis NSDK a un nodo del árbol
    */
-  convertRepositoryTreeToModuleNodes(treeNode: RepositoryTreeNode): ModuleNode[] {
-    if (!treeNode.children || treeNode.children.length === 0) {
-      return [];
-    }
-
-    return treeNode.children.map(child => this.convertTreeNodeToModuleNode(child));
-  }
-
-  /**
-   * Convierte un nodo del árbol del repositorio a ModuleNode
-   */
-  private convertTreeNodeToModuleNode(treeNode: RepositoryTreeNode): ModuleNode {
-    const moduleNode: ModuleNode = {
-      name: treeNode.name,
-      type: treeNode.type,
-      path: treeNode.path,
-      is_file: treeNode.is_file,
-      is_dir: treeNode.is_dir,
-      file_count: treeNode.file_count,
-      dir_count: treeNode.dir_count,
-      size_kb: treeNode.size_kb,
-      extension: treeNode.extension,
-      line_count: treeNode.line_count,
-      char_count: treeNode.char_count,
-      function_count: treeNode.function_count,
-      functions: treeNode.functions,
-      field_count: treeNode.field_count,
-      fields: treeNode.fields,
-      button_count: treeNode.button_count,
-      buttons: treeNode.buttons,
+  convertAnalysisToModuleNode(analysis: NSDKAnalysis): ModuleNode {
+    return {
+      name: analysis.file_name,
+      type: analysis.file_type as any,
+      path: analysis.file_path,
+      id: analysis.id,
+      is_file: true,
+      is_dir: false,
+      size_kb: analysis.size_kb,
+      line_count: analysis.line_count,
+      char_count: analysis.char_count,
+      function_count: analysis.function_count,
+      functions: analysis.functions,
+      field_count: analysis.field_count,
+      fields: analysis.fields,
+      button_count: analysis.button_count,
+      buttons: analysis.buttons,
+      status: analysis.analysis_status as any,
       children: []
     };
-
-    // Convertir recursivamente los hijos
-    if (treeNode.children && treeNode.children.length > 0) {
-      moduleNode.children = treeNode.children.map(child => this.convertTreeNodeToModuleNode(child));
-    }
-
-    // Agregar información adicional según el tipo
-    if (treeNode.type === 'module') {
-      moduleNode.status = 'analyzed';
-      moduleNode.complexity = this.calculateComplexityFromTreeNode(treeNode);
-      moduleNode.estimatedHours = this.estimateHoursFromTreeNode(treeNode);
-    } else if (treeNode.type === 'screen') {
-      moduleNode.status = 'analyzed';
-      moduleNode.complexity = this.calculateComplexityFromTreeNode(treeNode);
-      moduleNode.estimatedHours = this.estimateHoursFromTreeNode(treeNode);
-    } else if (treeNode.type === 'directory') {
-      moduleNode.status = 'pending';
-    }
-
-    return moduleNode;
   }
 
   /**
@@ -458,11 +572,18 @@ export class ModulesComponent implements OnInit {
     return labels[status as keyof typeof labels] || status;
   }
 
+  /**
+   * Obtiene estadísticas del árbol basadas en análisis de BD
+   */
   getTreeStats(): string {
-    const totalScreens = this.countScreens(this.TREE_DATA);
-    const analyzedScreens = this.countScreensByStatus(this.TREE_DATA, 'analyzed');
-    const generatedScreens = this.countScreensByStatus(this.TREE_DATA, 'generated');
-    return `${totalScreens} pantallas totales, ${analyzedScreens} analizadas, ${generatedScreens} generadas`;
+    if (!this.analysisStatus) {
+      return 'Cargando estadísticas...';
+    }
+    
+    const db = this.analysisStatus.database_stats;
+    const disk = this.analysisStatus.disk_stats;
+    
+    return `${db.total_files} archivos analizados (${db.analysis_progress.toFixed(1)}% completado) | ${disk.total_files_on_disk} archivos en disco | Estado: ${this.analysisStatus.sync_status === 'in_sync' ? 'Sincronizado' : 'Desincronizado'}`;
   }
 
   countScreens(nodes: ModuleNode[]): number {
@@ -498,10 +619,11 @@ export class ModulesComponent implements OnInit {
     return Math.round((completedScreens / totalScreens) * 100);
   }
 
+  /**
+   * Refresca los módulos (sincroniza y recarga)
+   */
   refreshModules() {
-    console.log('Actualizando módulos desde backend...');
-    this.loadModulesFromBackend();
-    this.snackBar.open('Módulos actualizados', 'Cerrar', { duration: 2000 });
+    this.syncAnalysisWithDatabase();
   }
 
   vectorizeCode() {

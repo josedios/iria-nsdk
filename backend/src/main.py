@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from .application.use_cases.test_connections_use_case import TestConnectionsUseCase
 from .infrastructure.services.repository_manager_service import RepositoryManagerService
+from .infrastructure.services.nsdk_analysis_sync_service import NSDKAnalysisSyncService
+from .infrastructure.repositories.nsdk_file_analysis_repository import NSDKFileAnalysisRepository
 
 # Configurar logging
 logging.basicConfig(
@@ -63,6 +65,17 @@ config_repo = ConfigurationRepositoryImpl()
 
 # Instancia del servicio de gestión de repositorios
 repo_manager = RepositoryManagerService()
+
+# Instancia del repositorio de análisis de archivos NSDK
+def get_analysis_repository():
+    db = next(get_db())
+    return NSDKFileAnalysisRepository(db)
+
+# Instancia del servicio de sincronización de análisis
+def get_analysis_sync_service():
+    db = next(get_db())
+    analysis_repo = NSDKFileAnalysisRepository(db)
+    return NSDKAnalysisSyncService(repo_manager, analysis_repo)
 
 class TestConnectionsRequest(BaseModel):
     config_data: Dict[str, Any]
@@ -390,3 +403,99 @@ def chat_completion():
 def get_embedding():
     """Obtener embedding de un texto"""
     return {"embedding": []} 
+
+@app.post("/repositories/{repo_name}/sync-analysis", tags=["Análisis NSDK"])
+def sync_repository_analysis(
+    repo_name: str, 
+    force_resync: bool = False,
+    analysis_sync_service: NSDKAnalysisSyncService = Depends(get_analysis_sync_service)
+):
+    """Sincroniza el análisis de archivos NSDK de un repositorio con la base de datos"""
+    try:
+        sync_stats = analysis_sync_service.sync_repository_analysis(repo_name, force_resync)
+        logger.info(f"Sincronización de análisis completada para {repo_name}: {sync_stats}")
+        return {
+            "repository_name": repo_name,
+            "sync_stats": sync_stats,
+            "message": "Sincronización de análisis completada exitosamente"
+        }
+    except Exception as e:
+        logger.error(f"Error en sincronización de análisis para {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en sincronización: {str(e)}")
+
+@app.get("/repositories/{repo_name}/analysis-status", tags=["Análisis NSDK"])
+def get_repository_analysis_status(
+    repo_name: str,
+    analysis_sync_service: NSDKAnalysisSyncService = Depends(get_analysis_sync_service)
+):
+    """Obtiene el estado del análisis de un repositorio"""
+    try:
+        status = analysis_sync_service.get_repository_analysis_status(repo_name)
+        return status
+    except Exception as e:
+        logger.error(f"Error obteniendo estado de análisis para {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estado: {str(e)}")
+
+@app.get("/repositories/{repo_name}/analysis", tags=["Análisis NSDK"])
+def get_repository_analysis(
+    repo_name: str,
+    file_type: Optional[str] = None,
+    status: Optional[str] = None,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository)
+):
+    """Obtiene los análisis de archivos NSDK de un repositorio"""
+    try:
+        if file_type and status:
+            analyses = analysis_repo.get_by_type_and_status(file_type, status, repo_name)
+        elif file_type:
+            analyses = analysis_repo.get_by_type(file_type, repo_name)
+        elif status:
+            analyses = analysis_repo.get_by_status(status, repo_name)
+        else:
+            analyses = analysis_repo.get_by_repository(repo_name)
+        
+        return {
+            "repository_name": repo_name,
+            "total_analyses": len(analyses),
+            "analyses": [analysis.__dict__ for analysis in analyses]
+        }
+    except Exception as e:
+        logger.error(f"Error obteniendo análisis para {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo análisis: {str(e)}")
+
+@app.get("/repositories/{repo_name}/analysis/{analysis_id}", tags=["Análisis NSDK"])
+def get_analysis_by_id(
+    repo_name: str,
+    analysis_id: str,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository)
+):
+    """Obtiene un análisis específico por ID"""
+    try:
+        analysis = analysis_repo.get_by_id(analysis_id)
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Análisis no encontrado")
+        
+        return analysis.__dict__
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error obteniendo análisis {analysis_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo análisis: {str(e)}")
+
+@app.post("/repositories/{repo_name}/cleanup-orphaned", tags=["Análisis NSDK"])
+def cleanup_orphaned_analyses(
+    repo_name: str,
+    analysis_sync_service: NSDKAnalysisSyncService = Depends(get_analysis_sync_service)
+):
+    """Limpia análisis huérfanos de un repositorio"""
+    try:
+        cleanup_stats = analysis_sync_service.cleanup_orphaned_analyses(repo_name)
+        logger.info(f"Limpieza de análisis huérfanos completada para {repo_name}: {cleanup_stats}")
+        return {
+            "repository_name": repo_name,
+            "cleanup_stats": cleanup_stats,
+            "message": "Limpieza de análisis huérfanos completada exitosamente"
+        }
+    except Exception as e:
+        logger.error(f"Error en limpieza de análisis huérfanos para {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en limpieza: {str(e)}") 

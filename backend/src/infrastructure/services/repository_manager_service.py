@@ -253,7 +253,7 @@ class RepositoryManagerService:
             if not self.is_repository_cloned(repo_name):
                 return {}
             
-            def build_tree(path: Path, current_depth: int = 0, max_depth: int = 5) -> Dict[str, Any]:
+            def build_tree(path: Path, current_depth: int = 0, max_depth: int = 10) -> Dict[str, Any]:
                 """Construye recursivamente la estructura del árbol"""
                 if current_depth > max_depth:
                     return {}
@@ -270,26 +270,39 @@ class RepositoryManagerService:
                 
                 if path.is_dir():
                     # Agregar información del directorio
-                    result['file_count'] = len(list(path.glob('*')))
-                    result['dir_count'] = len([x for x in path.iterdir() if x.is_dir()])
-                    
-                    # Procesar subdirectorios y archivos
-                    for item in sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
-                        if item.name.startswith('.'):  # Ignorar archivos ocultos
-                            continue
+                    try:
+                        items = list(path.iterdir())
+                        result['file_count'] = len([x for x in items if x.is_file()])
+                        result['dir_count'] = len([x for x in items if x.is_dir()])
                         
-                        child = build_tree(item, current_depth + 1, max_depth)
-                        if child:
-                            result['children'].append(child)
+                        # Procesar subdirectorios y archivos
+                        for item in sorted(items, key=lambda x: (x.is_file(), x.name.lower())):
+                            if item.name.startswith('.'):  # Ignorar archivos ocultos
+                                continue
+                            
+                            child = build_tree(item, current_depth + 1, max_depth)
+                            if child:
+                                result['children'].append(child)
+                    except PermissionError:
+                        logger.warning(f"Sin permisos para acceder a {path}")
+                        result['file_count'] = 0
+                        result['dir_count'] = 0
                 
                 elif path.is_file():
                     # Agregar información del archivo
-                    result['size_kb'] = round(path.stat().st_size / 1024, 2)
-                    result['extension'] = path.suffix.lower()
-                    
-                    # Si es un archivo NSDK, agregar información específica
-                    if path.suffix.lower() in ['.ncl', '.scr', '.inc', '.prg']:
-                        result.update(self._get_nsdk_file_info(path))
+                    try:
+                        result['size_kb'] = round(path.stat().st_size / 1024, 2)
+                        result['extension'] = path.suffix.lower()
+                        
+                        # Si es un archivo NSDK, agregar información específica
+                        if path.suffix.lower() in ['.ncl', '.scr', '.inc', '.prg']:
+                            nsdk_info = self._get_nsdk_file_info(path)
+                            result.update(nsdk_info)
+                            logger.debug(f"Información NSDK extraída para {path}: {nsdk_info}")
+                    except PermissionError:
+                        logger.warning(f"Sin permisos para acceder a {path}")
+                    except Exception as e:
+                        logger.warning(f"Error procesando archivo {path}: {str(e)}")
                 
                 return result
             
@@ -339,14 +352,42 @@ class RepositoryManagerService:
             # Información específica según el tipo
             suffix = file_path.suffix.lower()
             if suffix == '.ncl':
-                info['functions'] = self._extract_functions(content)[:10]
-                info['function_count'] = len(info['functions'])
+                functions = self._extract_functions(content)
+                info['functions'] = functions[:10]  # Solo las primeras 10 funciones
+                info['function_count'] = len(functions)
+                info['type'] = 'module'
+                
+                # Extraer información adicional del módulo
+                module_name = self._extract_module_name(content, file_path.name)
+                info['module_name'] = module_name
+                
             elif suffix == '.scr':
-                info['fields'] = self._extract_fields(content)[:10]
-                info['buttons'] = self._extract_buttons(content)[:10]
-                info['field_count'] = len(info['fields'])
-                info['button_count'] = len(info['buttons'])
+                fields = self._extract_fields(content)
+                buttons = self._extract_buttons(content)
+                info['fields'] = fields[:10]  # Solo los primeros 10 campos
+                info['buttons'] = buttons[:10]  # Solo los primeros 10 botones
+                info['field_count'] = len(fields)
+                info['button_count'] = len(buttons)
+                info['type'] = 'screen'
+                
+                # Extraer información adicional de la pantalla
+                screen_name = self._extract_screen_name(content, file_path.name)
+                info['screen_name'] = screen_name
+                
+            elif suffix == '.inc':
+                info['type'] = 'include'
+                # Los includes pueden tener funciones o campos
+                functions = self._extract_functions(content)
+                info['functions'] = functions[:10]
+                info['function_count'] = len(functions)
+                
+            elif suffix == '.prg':
+                info['type'] = 'program'
+                functions = self._extract_functions(content)
+                info['functions'] = functions[:10]
+                info['function_count'] = len(functions)
             
+            logger.debug(f"Información NSDK extraída para {file_path.name}: {info}")
             return info
             
         except Exception as e:
@@ -367,8 +408,65 @@ class RepositoryManagerService:
     def _extract_functions(self, content: str) -> List[str]:
         """Extrae nombres de funciones del contenido del archivo"""
         import re
-        functions = re.findall(r'FUNCTION\s+(\w+)', content, re.IGNORECASE)
+        # Buscar patrones de función NSDK
+        patterns = [
+            r'FUNCTION\s+(\w+)',  # FUNCTION nombre
+            r'PROCEDURE\s+(\w+)',  # PROCEDURE nombre
+            r'SUB\s+(\w+)',  # SUB nombre
+            r'(\w+)\s*:\s*PROCEDURE',  # nombre : PROCEDURE
+            r'(\w+)\s*:\s*FUNCTION',  # nombre : FUNCTION
+        ]
+        
+        functions = []
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            functions.extend(matches)
+        
+        # Eliminar duplicados y valores vacíos
+        functions = list(set([f.strip() for f in functions if f.strip()]))
         return functions
+    
+    def _extract_fields(self, content: str) -> List[str]:
+        """Extrae nombres de campos del contenido del archivo"""
+        import re
+        # Buscar patrones de campo NSDK
+        patterns = [
+            r'FIELD\s+(\w+)',  # FIELD nombre
+            r'(\w+)\s*:\s*FIELD',  # nombre : FIELD
+            r'(\w+)\s*=\s*FIELD',  # nombre = FIELD
+            r'(\w+)\s*:\s*TEXT',  # nombre : TEXT
+            r'(\w+)\s*:\s*NUMBER',  # nombre : NUMBER
+            r'(\w+)\s*:\s*DATE',  # nombre : DATE
+        ]
+        
+        fields = []
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            fields.extend(matches)
+        
+        # Eliminar duplicados y valores vacíos
+        fields = list(set([f.strip() for f in fields if f.strip()]))
+        return fields
+    
+    def _extract_buttons(self, content: str) -> List[str]:
+        """Extrae nombres de botones del contenido del archivo"""
+        import re
+        # Buscar patrones de botón NSDK
+        patterns = [
+            r'BUTTON\s+(\w+)',  # BUTTON nombre
+            r'(\w+)\s*:\s*BUTTON',  # nombre : BUTTON
+            r'(\w+)\s*=\s*BUTTON',  # nombre = BUTTON
+            r'(\w+)\s*:\s*PUSH\s+BUTTON',  # nombre : PUSH BUTTON
+        ]
+        
+        buttons = []
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            buttons.extend(matches)
+        
+        # Eliminar duplicados y valores vacíos
+        buttons = list(set([b.strip() for b in buttons if b.strip()]))
+        return buttons
     
     def get_nsdk_screens(self, repo_name: str) -> List[Dict[str, Any]]:
         """
@@ -441,15 +539,3 @@ class RepositoryManagerService:
         
         # Si no hay declaración SCREEN, usar el nombre del archivo
         return filename.replace('.SCR', '').replace('.scr', '')
-    
-    def _extract_fields(self, content: str) -> List[str]:
-        """Extrae nombres de campos del contenido del archivo"""
-        import re
-        fields = re.findall(r'FIELD\s+(\w+)', content, re.IGNORECASE)
-        return fields
-    
-    def _extract_buttons(self, content: str) -> List[str]:
-        """Extrae nombres de botones del contenido del archivo"""
-        import re
-        buttons = re.findall(r'BUTTON\s+(\w+)', content, re.IGNORECASE)
-        return buttons

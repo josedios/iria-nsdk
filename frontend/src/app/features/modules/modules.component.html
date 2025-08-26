@@ -6,11 +6,27 @@
         <mat-icon>refresh</mat-icon>
         Actualizar
       </button>
+      <button mat-raised-button color="warn" (click)="syncAnalysisWithDatabase()" 
+              [disabled]="isLoadingAnalysis">
+        <mat-icon>sync</mat-icon>
+        {{ isLoadingAnalysis ? 'Sincronizando...' : 'Sincronizar Análisis' }}
+      </button>
       <button mat-raised-button color="accent" (click)="vectorizeCode()">
         <mat-icon>upload</mat-icon>
         Vectorizar Código
       </button>
     </div>
+  </div>
+
+  <!-- Indicador de estado de sincronización -->
+  <div *ngIf="isLoadingAnalysis" class="sync-status">
+    <mat-spinner diameter="30"></mat-spinner>
+    <span>Sincronizando análisis del repositorio...</span>
+  </div>
+
+  <div *ngIf="analysisErrorMessage" class="sync-error">
+    <mat-icon>error</mat-icon>
+    <span>{{ analysisErrorMessage }}</span>
   </div>
 
   <div class="modules-content">
