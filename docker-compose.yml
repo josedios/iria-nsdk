@@ -13,7 +13,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./backend/migrations/01_complete_schema.sql:/docker-entrypoint-initdb.d/01_complete_schema.sql
     networks:
       - prompt-maestro-network
 

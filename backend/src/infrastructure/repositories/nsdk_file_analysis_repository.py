@@ -100,6 +100,35 @@ class NSDKFileAnalysisRepository:
             logger.error(f"Error obteniendo análisis del repositorio {repository_name}: {str(e)}")
             return []
     
+    def get_files_by_directory_id(self, directory_id: str) -> List[NSDKFileAnalysis]:
+        """Obtiene archivos que pertenecen a un directorio específico"""
+        try:
+            # Por ahora, usamos la ruta del directorio para filtrar
+            # En el futuro, podríamos agregar un campo directory_id a la entidad
+            models = self.db.query(NSDKFileAnalysisModel).filter(
+                NSDKFileAnalysisModel.file_path.like(f"%{directory_id}%")
+            ).all()
+            
+            return [self._model_to_entity(model) for model in models]
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo archivos del directorio {directory_id}: {str(e)}")
+            return []
+    
+    def get_files_by_directory_ids(self, directory_ids: List[str]) -> List[NSDKFileAnalysis]:
+        """Obtiene archivos que pertenecen a múltiples directorios"""
+        try:
+            all_files = []
+            for directory_id in directory_ids:
+                files = self.get_files_by_directory_id(directory_id)
+                all_files.extend(files)
+            
+            return all_files
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo archivos de múltiples directorios: {str(e)}")
+            return []
+    
     def get_by_type(self, file_type: str, repository_name: str) -> List[NSDKFileAnalysis]:
         """Obtiene análisis por tipo de archivo"""
         try:

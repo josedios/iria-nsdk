@@ -2,12 +2,53 @@
   padding: 20px;
 }
 
-.knowledge-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30px;
-}
+ .knowledge-header {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   margin-bottom: 30px;
+ }
+
+ .selective-vectorization {
+   margin-bottom: 30px;
+   padding: 20px;
+   background-color: #f8f9fa;
+   border-radius: 8px;
+   border: 1px solid #e9ecef;
+ }
+
+ .selective-vectorization h3 {
+   margin: 0 0 15px 0;
+   color: #495057;
+   font-size: 18px;
+   font-weight: 500;
+ }
+
+ .repo-buttons {
+   display: flex;
+   gap: 15px;
+   flex-wrap: wrap;
+ }
+
+ .repo-buttons button {
+   min-width: 180px;
+   height: 48px;
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   font-weight: 500;
+ }
+
+ .repo-buttons button small {
+   font-size: 11px;
+   opacity: 0.7;
+   margin-left: auto;
+ }
+
+ .repo-buttons button:disabled {
+   opacity: 0.6;
+   cursor: not-allowed;
+ }
 
 .knowledge-header h1 {
   margin: 0;
@@ -57,6 +98,7 @@
 .stat-icon.documents { color: #2196F3; }
 .stat-icon.source { color: #4CAF50; }
 .stat-icon.target { color: #FF9800; }
+.stat-icon.backend { color: #607D8B; }
 .stat-icon.docs { color: #9C27B0; }
 
 .stat-info h3 {
@@ -71,21 +113,57 @@
   font-size: 14px;
 }
 
-.progress-card, .info-card, .search-card, .results-card, .documents-card {
-  margin-bottom: 20px;
-}
+ .status-card, .info-card, .search-card, .results-card, .documents-card {
+   margin-bottom: 20px;
+ }
 
-.progress-info {
-  text-align: center;
-}
+ .status-info {
+   text-align: center;
+ }
 
-.progress-details {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
-  font-size: 12px;
-  color: #666;
-}
+ .status-icon {
+   animation: spin 2s linear infinite;
+   margin-right: 10px;
+   color: #2196F3;
+ }
+
+ @keyframes spin {
+   from { transform: rotate(0deg); }
+   to { transform: rotate(360deg); }
+ }
+
+ .status-message {
+   font-size: 16px;
+   font-weight: 500;
+   margin-bottom: 20px;
+   color: #333;
+ }
+
+ .progress-summary {
+   display: flex;
+   flex-direction: column;
+   gap: 12px;
+   align-items: center;
+ }
+
+ .summary-item {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   padding: 8px 16px;
+   background-color: #f8f9fa;
+   border-radius: 20px;
+   border: 1px solid #e9ecef;
+   font-size: 14px;
+   color: #495057;
+ }
+
+ .repo-icon {
+   font-size: 18px;
+   width: 18px;
+   height: 18px;
+   color: #666;
+ }
 
 .info-grid {
   display: grid;
@@ -282,23 +360,46 @@ mat-card-header {
   margin-left: auto;
 }
 
-@media (max-width: 768px) {
-  .knowledge-header {
-    flex-direction: column;
-    gap: 15px;
-    align-items: flex-start;
-  }
-  
-  .header-actions {
-    width: 100%;
-  }
-  
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .search-options {
-    flex-direction: column;
-    align-items: stretch;
-  }
-} 
+   @media (max-width: 768px) {
+    .knowledge-header {
+      flex-direction: column;
+      gap: 15px;
+      align-items: flex-start;
+    }
+    
+    .header-actions {
+      width: 100%;
+    }
+    
+    .selective-vectorization {
+      padding: 15px;
+    }
+    
+    .repo-buttons {
+      flex-direction: column;
+      gap: 10px;
+    }
+    
+    .repo-buttons button {
+      min-width: 100%;
+      justify-content: center;
+    }
+    
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .search-options {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    
+         .progress-summary {
+       gap: 8px;
+     }
+     
+     .summary-item {
+       padding: 6px 12px;
+       font-size: 13px;
+     }
+  } 

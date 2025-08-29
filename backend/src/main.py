@@ -3,10 +3,11 @@ from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 from .domain.entities.configuration import Configuration
-from .application.dto.configuration_dto import ConfigurationDTO
+from .application.dto.configuration_dto import ConfigurationDTO, CreateConfigurationDTO, UpdateConfigurationDTO
 from .infrastructure.repositories.configuration_repository_impl import ConfigurationRepositoryImpl
-from .database import get_db
+from .database import get_db, DATABASE_URL
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 from .application.use_cases.test_connections_use_case import TestConnectionsUseCase
 from .infrastructure.services.repository_manager_service import RepositoryManagerService
@@ -44,6 +45,41 @@ def test_simple():
     print("=== TEST SIMPLE PRINT ===")
     return {"message": "Simple test works", "status": "success"}
 
+@app.get("/test-db", tags=["Test"])
+async def test_database():
+    """Endpoint de prueba para verificar conexión a la base de datos"""
+    try:
+        logger.info("=== PROBANDO CONEXIÓN A BASE DE DATOS ===")
+        
+        # Probar conexión básica
+        db = next(get_db())
+        logger.info("✅ Conexión a BD establecida")
+        
+        # Probar consulta simple
+        result = db.execute(text("SELECT 1 as test"))
+        test_value = result.scalar()
+        logger.info(f"✅ Consulta de prueba exitosa: {test_value}")
+        
+        # Probar tabla de configuraciones
+        configs = db.query(Configuration).all()
+        logger.info(f"✅ Tabla de configuraciones accesible: {len(configs)} configuraciones encontradas")
+        
+        db.close()
+        return {
+            "message": "Conexión a base de datos exitosa",
+            "status": "success",
+            "configs_count": len(configs),
+            "database_url": DATABASE_URL.replace("postgres:postgres", "***:***")  # Ocultar credenciales
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error en conexión a BD: {e}")
+        return {
+            "message": f"Error en conexión a base de datos: {str(e)}",
+            "status": "error",
+            "error": str(e)
+        }
+
 @app.get("/test-error", tags=["Test"])
 def test_error():
     """Endpoint de prueba que genera un error"""
@@ -77,6 +113,18 @@ def get_analysis_sync_service():
     analysis_repo = NSDKFileAnalysisRepository(db)
     return NSDKAnalysisSyncService(repo_manager, analysis_repo)
 
+# Instancia del servicio de estructura de directorios
+def get_directory_tree_service():
+    db = next(get_db())
+    analysis_repo = NSDKFileAnalysisRepository(db)
+    from .infrastructure.repositories.nsdk_directory_repository import NSDKDirectoryRepository
+    from .application.services.directory_tree_service import DirectoryTreeService
+    directory_repo = NSDKDirectoryRepository(db)
+    return DirectoryTreeService(directory_repo, analysis_repo)
+
+# Variable global para el servicio de directorios
+directory_tree_service = get_directory_tree_service()
+
 class TestConnectionsRequest(BaseModel):
     config_data: Dict[str, Any]
 
@@ -86,10 +134,14 @@ class TestConnectionsResult(BaseModel):
     message: str
 
 @app.get("/configurations", response_model=List[ConfigurationDTO], tags=["Configuración"])
-def get_configurations():
+async def get_configurations():
     """Listar todas las configuraciones"""
-    configs = config_repo.db.query(Configuration).all()
-    return configs
+    try:
+        configs = await config_repo.find_all()
+        return configs
+    except Exception as e:
+        logger.error(f"Error al obtener configuraciones: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 @app.get("/configurations/active", tags=["Configuración"])
 def get_active_configuration():
@@ -97,48 +149,73 @@ def get_active_configuration():
     return {}
 
 @app.get("/configurations/{config_id}", response_model=ConfigurationDTO, tags=["Configuración"])
-def get_configuration(config_id: str):
+async def get_configuration(config_id: str):
     """Obtener una configuración por ID"""
-    config = config_repo.db.query(Configuration).filter(Configuration.id == config_id).first()
-    if not config:
-        raise HTTPException(status_code=404, detail="Configuración no encontrada")
-    return config
+    try:
+        config = await config_repo.find_by_id(config_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Configuración no encontrada")
+        return config
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener configuración {config_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 @app.post("/configurations", response_model=ConfigurationDTO, tags=["Configuración"])
-def create_configuration(config: ConfigurationDTO):
+async def create_configuration(config: CreateConfigurationDTO):
     """Crear una nueva configuración"""
-    db_config = Configuration(
-        name=config.name,
-        description=config.description,
-        config_data=config.config_data
-    )
-    config_repo.db.add(db_config)
-    config_repo.db.commit()
-    config_repo.db.refresh(db_config)
-    return db_config
+    try:
+        logger.info(f"Creando configuración: {config.name}")
+        db_config = Configuration(
+            name=config.name,
+            description=config.description,
+            config_data=config.config_data
+        )
+        saved_config = await config_repo.save(db_config)
+        logger.info(f"Configuración creada exitosamente: {saved_config.id}")
+        return saved_config
+    except Exception as e:
+        logger.error(f"Error al crear configuración: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al crear configuración: {str(e)}")
 
 @app.put("/configurations/{config_id}", response_model=ConfigurationDTO, tags=["Configuración"])
-def update_configuration(config_id: str, config: ConfigurationDTO):
+async def update_configuration(config_id: str, config: UpdateConfigurationDTO):
     """Actualizar una configuración"""
-    db_config = config_repo.db.query(Configuration).filter(Configuration.id == config_id).first()
-    if not db_config:
-        raise HTTPException(status_code=404, detail="Configuración no encontrada")
-    db_config.name = config.name
-    db_config.description = config.description
-    db_config.config_data = config.config_data
-    config_repo.db.commit()
-    config_repo.db.refresh(db_config)
-    return db_config
+    try:
+        logger.info(f"Actualizando configuración: {config_id}")
+        db_config = await config_repo.find_by_id(config_id)
+        if not db_config:
+            raise HTTPException(status_code=404, detail="Configuración no encontrada")
+        
+        db_config.name = config.name
+        db_config.description = config.description
+        db_config.config_data = config.config_data
+        
+        updated_config = await config_repo.update(db_config)
+        logger.info(f"Configuración actualizada exitosamente: {config_id}")
+        return updated_config
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al actualizar configuración {config_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al actualizar configuración: {str(e)}")
 
 @app.delete("/configurations/{config_id}", tags=["Configuración"])
-def delete_configuration(config_id: str):
+async def delete_configuration(config_id: str):
     """Eliminar una configuración"""
-    db_config = config_repo.db.query(Configuration).filter(Configuration.id == config_id).first()
-    if not db_config:
-        raise HTTPException(status_code=404, detail="Configuración no encontrada")
-    config_repo.db.delete(db_config)
-    config_repo.db.commit()
-    return {"deleted": True}
+    try:
+        logger.info(f"Eliminando configuración: {config_id}")
+        success = await config_repo.delete(config_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Configuración no encontrada")
+        logger.info(f"Configuración eliminada exitosamente: {config_id}")
+        return {"deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al eliminar configuración {config_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al eliminar configuración: {str(e)}")
 
 @app.post("/configurations/{config_id}/activate", tags=["Configuración"])
 def activate_configuration(config_id: str):
@@ -146,21 +223,25 @@ def activate_configuration(config_id: str):
     return {"activated": True}
 
 @app.post("/configurations/test-connections", response_model=List[TestConnectionsResult], tags=["Configuración"])
-def test_connections(request: TestConnectionsRequest):
-    use_case = TestConnectionsUseCase()
-    return use_case.execute(request.config_data)
+async def test_connections(request: TestConnectionsRequest):
+    try:
+        use_case = TestConnectionsUseCase(repo_manager)
+        return use_case.execute(request.config_data)
+    except Exception as e:
+        logger.error(f"Error al probar conexiones: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al probar conexiones: {str(e)}")
 
 # --- ENDPOINTS DE VECTOR STORE Y VECTORIZE ---
 from .application.use_cases.vectorization_use_case import VectorizationUseCase
-from .infrastructure.services.nsdk_vectorization_service import NSDKVectorizationService
+from .infrastructure.services.nsdk_vectorization_service import UnifiedVectorizationService
 from .infrastructure.services.vector_store_service_impl import VectorStoreServiceImpl
 from .infrastructure.services.llm_service_impl import LLMServiceImpl
 
 # Instanciar servicios
 vector_store_service = VectorStoreServiceImpl()
 llm_service = LLMServiceImpl()
-nsdk_vectorization_service = NSDKVectorizationService(vector_store_service, llm_service, repo_manager)
-vectorization_use_case = VectorizationUseCase(nsdk_vectorization_service)
+unified_vectorization_service = UnifiedVectorizationService(vector_store_service, llm_service, repo_manager)
+vectorization_use_case = VectorizationUseCase(unified_vectorization_service)
 
 class VectorizeRepositoryRequest(BaseModel):
     repo_url: str
@@ -316,25 +397,51 @@ def get_modules():
         logger.error(f"Error obteniendo módulos: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error obteniendo módulos: {str(e)}")
 
-@app.get("/repository-tree/{repo_name}", tags=["Estructura del Repositorio"])
-def get_repository_tree(repo_name: str):
-    """Obtener la estructura de árbol completa de un repositorio"""
+@app.get("/repository-tree/{repo_name}")
+async def get_repository_tree(repo_name: str):
+    """Obtener solo la estructura raíz del repositorio para carga lazy"""
     try:
-        tree = repo_manager.get_repository_tree(repo_name)
-        if not tree:
-            raise HTTPException(status_code=404, detail=f"Repositorio {repo_name} no encontrado")
+        # Obtener solo la estructura raíz
+        root_structure = directory_tree_service.get_root_structure(repo_name)
+        return root_structure
+    except Exception as e:
+        logger.error(f"Error obteniendo estructura raíz del repositorio {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
+@app.get("/repository-tree/{repo_name}/directory/{directory_id}")
+async def get_directory_contents_by_id(repo_name: str, directory_id: str):
+    """Obtener el contenido de un directorio específico por ID"""
+    try:
+        directory_contents = directory_tree_service.get_directory_contents_by_id(directory_id)
+        if directory_contents is None:
+            raise HTTPException(status_code=404, detail=f"Directorio {directory_id} no encontrado en {repo_name}")
         
-        logger.info(f"Árbol del repositorio {repo_name} obtenido exitosamente")
-        return {
-            "repository_name": repo_name,
-            "tree": tree
-        }
-        
+        return directory_contents
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error obteniendo árbol del repositorio {repo_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error obteniendo árbol del repositorio: {str(e)}")
+        logger.error(f"Error obteniendo contenido del directorio {directory_id} en {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
+@app.post("/repository-tree/{repo_name}/build")
+async def build_repository_tree(repo_name: str):
+    """Construir la estructura de directorios en BD para un repositorio"""
+    try:
+        # Obtener la ruta del repositorio
+        repo_path = repo_manager.get_repository_path(repo_name)
+        if not repo_path:
+            raise HTTPException(status_code=404, detail=f"Repositorio {repo_name} no encontrado")
+        
+        # Construir el árbol en BD
+        root_directory_id = directory_tree_service.build_directory_tree_from_path(str(repo_path), repo_name)
+        
+        return {
+            "message": f"Estructura de directorios construida para {repo_name}",
+            "root_directory_id": root_directory_id
+        }
+    except Exception as e:
+        logger.error(f"Error construyendo estructura de directorios para {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 @app.get("/modules/{module_id}", tags=["Módulos"])
 def get_module(module_id: str):

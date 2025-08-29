@@ -3,12 +3,39 @@
     <h1>Gestión de Conocimiento</h1>
     <div class="header-actions">
       <button mat-raised-button color="primary" (click)="vectorizeRepositories()" [disabled]="isVectorizing">
-        <mat-icon>upload</mat-icon>
-        {{ isVectorizing ? 'Vectorizando...' : 'Vectorizar Repositorios' }}
+        <mat-icon>{{ isVectorizing ? 'sync' : 'upload' }}</mat-icon>
+        {{ isVectorizing ? 'Actualizando y Vectorizando...' : 'Vectorizar Todos' }}
       </button>
       <button mat-raised-button color="accent" (click)="openDocumentUpload()">
         <mat-icon>library_add</mat-icon>
         Subir Documentación
+      </button>
+    </div>
+  </div>
+
+  <!-- Botones de Vectorización Selectiva -->
+  <div class="selective-vectorization" *ngIf="hasConfiguration">
+    <h3>Vectorización Selectiva</h3>
+    <div class="repo-buttons">
+      <button mat-stroked-button color="primary" (click)="vectorizeSpecificRepository('nsdk_source')"
+        [disabled]="isVectorizing || !hasSourceRepo">
+        <mat-icon>code</mat-icon>
+        Vectorizar NSDK
+        <small *ngIf="!hasSourceRepo">(No configurado)</small>
+      </button>
+
+      <button mat-stroked-button color="accent" (click)="vectorizeSpecificRepository('frontend_code')"
+        [disabled]="isVectorizing || !hasFrontendRepo">
+        <mat-icon>web</mat-icon>
+        Vectorizar Frontend
+        <small *ngIf="!hasFrontendRepo">(No configurado)</small>
+      </button>
+
+      <button mat-stroked-button color="warn" (click)="vectorizeSpecificRepository('backend_code')"
+        [disabled]="isVectorizing || !hasBackendRepo">
+        <mat-icon>settings</mat-icon>
+        Vectorizar Backend
+        <small *ngIf="!hasBackendRepo">(No configurado)</small>
       </button>
     </div>
   </div>
@@ -36,7 +63,8 @@
                 <mat-icon class="stat-icon source">code</mat-icon>
                 <div class="stat-info">
                   <h3>{{ stats.sourceDocuments | number }}</h3>
-                  <p>Código NSDK</p>
+                  <p>Código NSDK (Legacy)</p>
+                  <small>Repositorio origen a migrar</small>
                 </div>
               </div>
             </mat-card-content>
@@ -48,7 +76,21 @@
                 <mat-icon class="stat-icon target">web</mat-icon>
                 <div class="stat-info">
                   <h3>{{ stats.targetDocuments | number }}</h3>
-                  <p>Código Moderno</p>
+                  <p>Frontend Angular</p>
+                  <small>Código moderno generado</small>
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card class="stat-card">
+            <mat-card-content>
+              <div class="stat-content">
+                <mat-icon class="stat-icon backend">settings</mat-icon>
+                <div class="stat-info">
+                  <h3>{{ stats.backendDocuments | number }}</h3>
+                  <p>Backend Spring Boot</p>
+                  <small>Código moderno generado</small>
                 </div>
               </div>
             </mat-card-content>
@@ -61,24 +103,44 @@
                 <div class="stat-info">
                   <h3>{{ stats.documentationDocuments | number }}</h3>
                   <p>Documentación</p>
+                  <small>Guías y referencias</small>
                 </div>
               </div>
             </mat-card-content>
           </mat-card>
         </div>
 
-        <!-- Progreso de Vectorización -->
-        <mat-card class="progress-card" *ngIf="isVectorizing">
+        <!-- Estado de Vectorización -->
+        <mat-card class="status-card" *ngIf="isVectorizing">
           <mat-card-header>
-            <mat-card-title>Progreso de Vectorización</mat-card-title>
+            <mat-card-title>
+              <mat-icon class="status-icon">sync</mat-icon>
+              Estado de Vectorización
+            </mat-card-title>
           </mat-card-header>
           <mat-card-content>
-            <div class="progress-info">
-              <p>{{ vectorizationStatus }}</p>
-              <mat-progress-bar mode="determinate" [value]="vectorizationProgress"></mat-progress-bar>
-              <div class="progress-details">
-                <span>{{ vectorizationProgress }}% completado</span>
-                <span>{{ processedFiles }}/{{ totalFiles }} archivos</span>
+            <div class="status-info">
+              <p class="status-message">{{ vectorizationStatus }}</p>
+
+              <!-- Información de Progreso -->
+              <div class="progress-summary" *ngIf="hasConfiguration">
+                <div class="summary-item" *ngIf="hasSourceRepo && getRepositoryProgress('nsdk_source')">
+                  <mat-icon class="repo-icon">code</mat-icon>
+                  <span>NSDK: {{ getRepositoryProgress('nsdk_source')?.processed || 0 }}/{{
+                    getRepositoryProgress('nsdk_source')?.total || 0 }} archivos</span>
+                </div>
+
+                <div class="summary-item" *ngIf="hasFrontendRepo && getRepositoryProgress('frontend_code')">
+                  <mat-icon class="repo-icon">web</mat-icon>
+                  <span>Frontend: {{ getRepositoryProgress('frontend_code')?.processed || 0 }}/{{
+                    getRepositoryProgress('frontend_code')?.total || 0 }} archivos</span>
+                </div>
+
+                <div class="summary-item" *ngIf="hasBackendRepo && getRepositoryProgress('backend_code')">
+                  <mat-icon class="repo-icon">settings</mat-icon>
+                  <span>Backend: {{ getRepositoryProgress('backend_code')?.processed || 0 }}/{{
+                    getRepositoryProgress('backend_code')?.total || 0 }} archivos</span>
+                </div>
               </div>
             </div>
           </mat-card-content>
@@ -141,10 +203,11 @@
                 <mat-form-field appearance="outline">
                   <mat-label>Tipo de Código</mat-label>
                   <mat-select [(ngModel)]="searchType">
-                    <mat-option value="all">Todos</mat-option>
-                    <mat-option value="nsdk_source">Código NSDK</mat-option>
-                    <mat-option value="target_code">Código Moderno</mat-option>
-                    <mat-option value="documentation">Documentación</mat-option>
+                    <mat-option value="all">🎯 Todos los repositorios</mat-option>
+                    <mat-option value="nsdk_source">📚 Solo código NSDK (Legacy)</mat-option>
+                    <mat-option value="frontend_code">🎨 Solo Frontend Angular</mat-option>
+                    <mat-option value="backend_code">🔧 Solo Backend Spring Boot</mat-option>
+                    <mat-option value="documentation">📄 Solo documentación</mat-option>
                   </mat-select>
                 </mat-form-field>
 

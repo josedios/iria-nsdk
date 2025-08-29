@@ -15,6 +15,10 @@
         <mat-icon>upload</mat-icon>
         Vectorizar Código
       </button>
+      <button mat-raised-button color="primary" (click)="buildDirectoryTree()">
+        <mat-icon>folder</mat-icon>
+        Construir Estructura
+      </button>
     </div>
   </div>
 
@@ -122,7 +126,8 @@
           <mat-tree-node *matTreeNodeDef="let node;when: hasChild" matTreeNodePadding>
             <div class="tree-node">
               <div class="node-content">
-                <button mat-icon-button matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name">
+                <button mat-icon-button matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name"
+                        (click)="loadDirectoryContents(node)">
                   <mat-icon class="mat-icon-rtl-mirror">
                     {{ treeControl.isExpanded(node) ? 'expand_more' : 'chevron_right' }}
                   </mat-icon>
@@ -134,6 +139,8 @@
                 <mat-chip class="status-chip" [class]="'status-' + node.status" *ngIf="node.status">
                   {{ getStatusLabel(node.status) }}
                 </mat-chip>
+                <!-- Indicador de carga para directorios -->
+                <mat-spinner *ngIf="node.isLoading" diameter="20" class="node-loading"></mat-spinner>
               </div>
 
               <!-- Contenedor de la derecha para nodos expandibles -->

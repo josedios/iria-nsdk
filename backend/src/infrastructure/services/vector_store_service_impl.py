@@ -61,6 +61,28 @@ class VectorStoreServiceImpl:
             logger.error(f"Error inicializando colección: {str(e)}")
             return False
     
+    def clear_collection(self, config: dict, collection_name: str = None) -> bool:
+        """Limpia completamente una colección del vector store"""
+        try:
+            tipo = config.get('type')
+            collection_name = collection_name or config.get('collectionName', 'nsdk-embeddings')
+            
+            logger.info(f"Limpiando colección '{collection_name}' del tipo {tipo}")
+            
+            if tipo == 'qdrant':
+                return self._clear_qdrant_collection(config, collection_name)
+            elif tipo == 'chroma':
+                return self._clear_chroma_collection(config, collection_name)
+            elif tipo == 'faiss':
+                return self._clear_faiss_collection(config, collection_name)
+            else:
+                logger.error(f"Tipo de vector store no soportado para limpieza: {tipo}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error limpiando colección: {str(e)}")
+            return False
+    
     def _init_qdrant_collection(self, config: dict, collection_name: str) -> bool:
         """Inicializa colección en Qdrant"""
         try:
@@ -467,4 +489,63 @@ class VectorStoreServiceImpl:
             }
             
         except Exception as e:
-            return {'error': str(e)} 
+            return {'error': str(e)}
+    
+    def _clear_qdrant_collection(self, config: dict, collection_name: str) -> bool:
+        """Limpia completamente una colección de Qdrant"""
+        try:
+            url = config.get('connectionString', 'http://localhost:6333')
+            
+            # Eliminar todos los puntos de la colección
+            resp = httpx.post(
+                f'{url}/collections/{collection_name}/points/delete',
+                json={"filter": {}},  # Filtro vacío = eliminar todo
+                timeout=10
+            )
+            
+            if resp.status_code in [200, 202]:
+                logger.info(f"Colección Qdrant '{collection_name}' limpiada exitosamente")
+                return True
+            else:
+                logger.error(f"Error limpiando colección Qdrant: {resp.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error limpiando colección Qdrant: {str(e)}")
+            return False
+    
+    def _clear_chroma_collection(self, config: dict, collection_name: str) -> bool:
+        """Limpia completamente una colección de Chroma"""
+        try:
+            url = config.get('connectionString', 'http://localhost:8000')
+            
+            # Eliminar todos los documentos de la colección
+            resp = httpx.delete(
+                f'{url}/api/v1/collections/{collection_name}/delete',
+                timeout=10
+            )
+            
+            if resp.status_code in [200, 204]:
+                logger.info(f"Colección Chroma '{collection_name}' limpiada exitosamente")
+                return True
+            else:
+                logger.error(f"Error limpiando colección Chroma: {resp.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error limpiando colección Chroma: {str(e)}")
+            return False
+    
+    def _clear_faiss_collection(self, config: dict, collection_name: str) -> bool:
+        """Limpia completamente una colección de FAISS"""
+        try:
+            # Reinicializar índices y metadatos
+            self.faiss_index = None
+            self.faiss_metadata = []
+            
+            logger.info(f"Colección FAISS '{collection_name}' limpiada exitosamente")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error limpiando colección FAISS: {str(e)}")
+            return False

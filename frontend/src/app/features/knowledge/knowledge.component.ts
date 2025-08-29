@@ -9,21 +9,21 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatPaginatorModule } from '@angular/material/paginator';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatSortModule } from '@angular/material/sort';
 import { MatTableModule } from '@angular/material/table';
 import { MatTabsModule } from '@angular/material/tabs';
+import { ConfigService, Configuration } from '../config/config.service';
 import { KnowledgeService, SearchCodeRequest, VectorizationBatch, VectorizationStats, VectorizeRepositoryRequest } from './knowledge.service';
-import { VectorizeRepoDialogComponent, VectorizeRepoDialogData } from './vectorize-repo-dialog.component';
 
 // Interfaces locales para el componente
 interface LocalVectorizationStats {
   totalDocuments: number;
   sourceDocuments: number;
   targetDocuments: number;
+  backendDocuments: number;
   documentationDocuments: number;
   lastUpdated: string;
   collectionSize: string;
@@ -61,7 +61,6 @@ interface LocalSearchResult {
     MatButtonModule,
     MatIconModule,
     MatTabsModule,
-    MatProgressBarModule,
     MatChipsModule,
     MatFormFieldModule,
     MatInputModule,
@@ -82,21 +81,28 @@ export class KnowledgeComponent implements OnInit {
   isSearching = false;
   isLoadingDocuments = false;
 
+  // Estado de configuración
+  hasConfiguration = false;
+  hasSourceRepo = false;
+  hasFrontendRepo = false;
+  hasBackendRepo = false;
+
   // Datos de estadísticas
   stats: LocalVectorizationStats = {
     totalDocuments: 0,
     sourceDocuments: 0,
     targetDocuments: 0,
+    backendDocuments: 0,
     documentationDocuments: 0,
     lastUpdated: 'Nunca',
     collectionSize: '0 archivos'
   };
 
-  // Progreso de vectorización
+  // Estado de vectorización
   vectorizationStatus = '';
-  vectorizationProgress = 0;
-  processedFiles = 0;
-  totalFiles = 0;
+
+  // Progreso por repositorio
+  repositoryProgress: { [key: string]: { processed: number; total: number; progress: number } } = {};
 
   // Búsqueda
   searchQuery = '';
@@ -110,61 +116,90 @@ export class KnowledgeComponent implements OnInit {
   constructor(
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
-    private knowledgeService: KnowledgeService
+    private knowledgeService: KnowledgeService,
+    private configService: ConfigService
   ) { }
 
   ngOnInit() {
-    // Primero cargar estadísticas, luego documentos basados en estadísticas reales
-    this.loadVectorizationStats();
+    // Primero cargar configuración, luego estadísticas y documentos
+    this.loadConfiguration();
+  }
+
+  private loadConfiguration() {
+    this.configService.getAll().subscribe({
+      next: (configurations: Configuration[]) => {
+        if (configurations.length > 0) {
+          const activeConfig = configurations[0];
+          this.updateConfigurationStatus(activeConfig.config_data);
+        }
+
+        // Continuar con la carga de estadísticas
+        this.loadVectorizationStats();
+      },
+      error: (error) => {
+        console.error('Error cargando configuración:', error);
+        // Continuar sin configuración
+        this.loadVectorizationStats();
+      }
+    });
+  }
+
+  private updateConfigurationStatus(configData: any) {
+    this.hasConfiguration = true;
+    this.hasSourceRepo = !!(configData.sourceRepo?.url && configData.sourceRepo?.branch);
+    this.hasFrontendRepo = !!(configData.frontendRepo?.url && configData.frontendRepo?.branch);
+    this.hasBackendRepo = !!(configData.backendRepo?.url && configData.backendRepo?.branch);
+
+    console.log('Estado de configuración actualizado:', {
+      hasSourceRepo: this.hasSourceRepo,
+      hasFrontendRepo: this.hasFrontendRepo,
+      hasBackendRepo: this.hasBackendRepo,
+      sourceRepoUrl: configData.sourceRepo?.url,
+      sourceRepoBranch: configData.sourceRepo?.branch
+    });
   }
 
   vectorizeRepositories() {
-    const dialogRef = this.dialog.open(VectorizeRepoDialogComponent, {
-      width: '500px',
-      data: {
-        repo_url: '',
-        branch: 'main',
-        username: '',
-        token: ''
-      }
-    });
+    // Verificar si ya está vectorizando
+    if (!this.canStartVectorization()) {
+      this.snackBar.open('Vectorización ya en progreso. Espera a que termine.', 'Cerrar', {
+        duration: 3000,
+        panelClass: ['warning-snackbar']
+      });
+      return;
+    }
 
-    dialogRef.afterClosed().subscribe((result: VectorizeRepoDialogData) => {
-      if (result && result.repo_url) {
-        this.startVectorization(result);
-      }
-    });
+    console.log('Iniciando vectorización de todos los repositorios...');
+
+    // Limpiar estado anterior si existe
+    this.clearVectorizationState();
+
+    // Obtener la configuración activa del sistema
+    this.loadActiveConfigurationAndVectorize();
   }
 
-  private startVectorization(data: VectorizeRepoDialogData) {
-    this.isVectorizing = true;
-    this.vectorizationProgress = 0;
-    this.processedFiles = 0;
-    this.totalFiles = 0;
-    this.vectorizationStatus = 'Iniciando vectorización...';
-
-    const vectorizeRequest: VectorizeRepositoryRequest = {
-      repo_url: data.repo_url,
-      branch: data.branch,
-      username: data.username || undefined,
-      token: data.token || undefined
-    };
-
-    this.knowledgeService.vectorizeRepository(vectorizeRequest).subscribe({
-      next: (response) => {
-        console.log('Vectorización iniciada:', response);
-        this.vectorizationStatus = `Vectorización iniciada. Lote: ${response.batch_id}`;
-
-        // Monitorear progreso del lote
-        if (response.batch_id) {
-          this.monitorBatchProgress(response.batch_id);
+  private loadActiveConfigurationAndVectorize() {
+    // Obtener configuración activa del sistema
+    this.configService.getAll().subscribe({
+      next: (configurations: Configuration[]) => {
+        if (configurations.length === 0) {
+          this.snackBar.open('No hay configuraciones disponibles. Configure los repositorios primero.', 'Cerrar', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+          return;
         }
+
+        // Usar la primera configuración activa (podríamos implementar lógica para seleccionar la activa)
+        const activeConfig = configurations[0];
+        console.log('Configuración activa encontrada:', activeConfig);
+
+        // Verificar qué repositorios están configurados y vectorizar solo los que faltan
+        this.analyzeAndVectorizeRepositories(activeConfig.config_data);
       },
       error: (error) => {
-        console.error('Error en vectorización:', error);
-        this.isVectorizing = false;
-        this.vectorizationStatus = 'Error en vectorización';
-        this.snackBar.open('Error al iniciar vectorización: ' + error.message, 'Cerrar', {
+        console.error('Error obteniendo configuraciones:', error);
+        this.snackBar.open('Error obteniendo configuración: ' + error.message, 'Cerrar', {
           duration: 5000,
           panelClass: ['error-snackbar']
         });
@@ -172,17 +207,483 @@ export class KnowledgeComponent implements OnInit {
     });
   }
 
+  private analyzeAndVectorizeRepositories(configData: any) {
+    // Analizar qué repositorios están configurados
+    const configuredRepos = this.getConfiguredRepositories(configData);
+
+    console.log('DEBUG: analyzeAndVectorizeRepositories - configData recibido:', configData);
+    console.log('DEBUG: analyzeAndVectorizeRepositories - configuredRepos resultante:', configuredRepos);
+
+    if (Object.keys(configuredRepos).length === 0) {
+      this.snackBar.open('No hay repositorios configurados. Configure al menos el repositorio NSDK.', 'Cerrar', {
+        duration: 5000,
+        panelClass: ['error-snackbar']
+      });
+      return;
+    }
+
+    console.log('Repositorios configurados:', configuredRepos);
+
+    // Verificar qué repositorios ya están vectorizados
+    this.checkVectorizationStatus(configuredRepos);
+  }
+
+  private getConfiguredRepositories(configData: any): any {
+    console.log('DEBUG: getConfiguredRepositories - configData recibido:', configData);
+
+    const repos: any = {};
+
+    // Verificar repositorio NSDK (origen) - obligatorio
+    if (configData.sourceRepo?.url && configData.sourceRepo?.branch) {
+      repos.sourceRepo = {
+        url: configData.sourceRepo.url,
+        branch: configData.sourceRepo.branch,
+        username: configData.sourceRepo.username,
+        token: configData.sourceRepo.token
+      };
+      console.log('DEBUG: sourceRepo configurado:', repos.sourceRepo);
+    } else {
+      console.log('DEBUG: sourceRepo NO configurado - url:', configData.sourceRepo?.url, 'branch:', configData.sourceRepo?.branch);
+    }
+
+    // Verificar repositorio Frontend - opcional
+    if (configData.frontendRepo?.url && configData.frontendRepo?.branch) {
+      repos.frontendRepo = {
+        url: configData.frontendRepo.url,
+        branch: configData.frontendRepo.branch,
+        username: configData.frontendRepo.username,
+        token: configData.frontendRepo.token
+      };
+      console.log('DEBUG: frontendRepo configurado:', repos.frontendRepo);
+    } else {
+      console.log('DEBUG: frontendRepo NO configurado - url:', configData.frontendRepo?.url, 'branch:', configData.frontendRepo?.branch);
+    }
+
+    // Verificar repositorio Backend - opcional
+    if (configData.backendRepo?.url && configData.backendRepo?.branch) {
+      repos.backendRepo = {
+        url: configData.backendRepo.url,
+        branch: configData.backendRepo.branch,
+        username: configData.backendRepo.username,
+        token: configData.backendRepo.token
+      };
+      console.log('DEBUG: backendRepo configurado:', repos.backendRepo);
+    } else {
+      console.log('DEBUG: backendRepo NO configurado - url:', configData.backendRepo?.url, 'branch:', configData.backendRepo?.branch);
+    }
+
+    console.log('DEBUG: getConfiguredRepositories - repos final:', repos);
+    return repos;
+  }
+
+  private checkVectorizationStatus(configuredRepos: any) {
+    // Verificar estado de vectorización de cada repositorio
+    // Por ahora, asumimos que no están vectorizados y procedemos
+    // En el futuro, aquí podríamos verificar en la BD qué repositorios ya están vectorizados
+
+    this.startSmartVectorization(configuredRepos);
+  }
+
+  private startSmartVectorization(configuredRepos: any) {
+    // Verificar si ya está vectorizando
+    if (this.isVectorizing) {
+      console.warn('Vectorización ya en progreso, ignorando nueva solicitud');
+      return;
+    }
+
+    console.log('DEBUG: startSmartVectorization - configuredRepos recibido:', configuredRepos);
+    console.log('DEBUG: startSmartVectorization - typeof configuredRepos:', typeof configuredRepos);
+    console.log('DEBUG: startSmartVectorization - Object.keys(configuredRepos):', Object.keys(configuredRepos));
+
+    this.isVectorizing = true;
+    this.vectorizationStatus = '🔄 Actualizando repositorios y limpiando vectorización existente...';
+
+    // Inicializar progreso por repositorio
+    this.repositoryProgress = {};
+    console.log('DEBUG: repositoryProgress inicializado como objeto vacío:', this.repositoryProgress);
+
+    if (configuredRepos.sourceRepo) {
+      this.repositoryProgress['nsdk_source'] = { processed: 0, total: 0, progress: 0 };
+      console.log('DEBUG: Progreso inicializado para nsdk_source:', this.repositoryProgress['nsdk_source']);
+    } else {
+      console.log('DEBUG: NO se inicializó progreso para nsdk_source porque configuredRepos.sourceRepo es falsy');
+    }
+
+    if (configuredRepos.frontendRepo) {
+      this.repositoryProgress['frontend_code'] = { processed: 0, total: 0, progress: 0 };
+      console.log('DEBUG: Progreso inicializado para frontend_code:', this.repositoryProgress['frontend_code']);
+    } else {
+      console.log('DEBUG: NO se inicializó progreso para frontend_code porque configuredRepos.frontendRepo es falsy');
+    }
+
+    if (configuredRepos.backendRepo) {
+      this.repositoryProgress['backend_code'] = { processed: 0, total: 0, progress: 0 };
+      console.log('DEBUG: Progreso inicializado para backend_code:', this.repositoryProgress['backend_code']);
+    } else {
+      console.log('DEBUG: NO se inicializó progreso para backend_code porque configuredRepos.backendRepo es falsy');
+    }
+
+    console.log('DEBUG: Estado final de repositoryProgress después de inicialización:', this.repositoryProgress);
+
+    // Crear array de promesas solo para repositorios configurados
+    const vectorizationPromises: Promise<any>[] = [];
+
+    // NSDK siempre se vectoriza (es obligatorio)
+    if (configuredRepos.sourceRepo) {
+      console.log('DEBUG: Añadiendo promesa para nsdk_source');
+      vectorizationPromises.push(
+        this.vectorizeSingleRepository(configuredRepos.sourceRepo, 'NSDK (Origen)', 'nsdk_source')
+      );
+    } else {
+      console.log('DEBUG: NO se añadió promesa para nsdk_source porque configuredRepos.sourceRepo es falsy');
+    }
+
+    // Frontend solo si está configurado
+    if (configuredRepos.frontendRepo) {
+      console.log('DEBUG: Añadiendo promesa para frontend_code');
+      vectorizationPromises.push(
+        this.vectorizeSingleRepository(configuredRepos.frontendRepo, 'Frontend Angular', 'frontend_code')
+      );
+    } else {
+      console.log('DEBUG: NO se añadió promesa para frontend_code porque configuredRepos.frontendRepo es falsy');
+    }
+
+    // Backend solo si está configurado
+    if (configuredRepos.backendRepo) {
+      console.log('DEBUG: Añadiendo promesa para backend_code');
+      vectorizationPromises.push(
+        this.vectorizeSingleRepository(configuredRepos.backendRepo, 'Backend Spring Boot', 'backend_code')
+      );
+    } else {
+      console.log('DEBUG: NO se añadió promesa para backend_code porque configuredRepos.backendRepo es falsy');
+    }
+
+    console.log('DEBUG: Total de promesas creadas:', vectorizationPromises.length);
+
+    if (vectorizationPromises.length === 0) {
+      console.log('DEBUG: No hay promesas para vectorizar, limpiando estado');
+      this.isVectorizing = false;
+      this.vectorizationStatus = 'No hay repositorios para vectorizar';
+      return;
+    }
+
+    // Vectorizar solo los repositorios configurados
+    Promise.all(vectorizationPromises)
+      .then((results) => {
+        console.log('Vectorización inteligente completada:', results);
+        this.vectorizationStatus = '✅ Vectorización completada exitosamente';
+
+        // Mantener la interfaz visible por más tiempo para mostrar el progreso final
+        setTimeout(() => {
+          this.isVectorizing = false;
+          console.log('Interfaz de progreso ocultada después de completar');
+        }, 5000); // 5 segundos para ver el resultado final
+
+        this.snackBar.open(`Vectorización completada para ${vectorizationPromises.length} repositorio(s)`, 'Cerrar', {
+          duration: 5000,
+          panelClass: ['success-snackbar']
+        });
+
+        // Refrescar estadísticas
+        this.refreshAllData();
+      })
+      .catch((error) => {
+        console.error('Error en vectorización inteligente:', error);
+        this.vectorizationStatus = '❌ Error en vectorización';
+
+        // Mantener la interfaz visible para mostrar el error
+        setTimeout(() => {
+          this.isVectorizing = false;
+          console.log('Interfaz de progreso ocultada después del error');
+        }, 3000);
+
+        this.snackBar.open('Error en vectorización: ' + error.message, 'Cerrar', {
+          duration: 5000,
+          panelClass: ['error-snackbar']
+        });
+      });
+  }
+
+  // Método anterior eliminado - reemplazado por startSmartVectorization
+
+  private vectorizeSingleRepository(repoConfig: any, repoName: string, repoType: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const vectorizeRequest: VectorizeRepositoryRequest = {
+        repo_url: repoConfig.url,
+        branch: repoConfig.branch,
+        username: repoConfig.username,
+        token: repoConfig.token
+      };
+
+      this.knowledgeService.vectorizeRepository(vectorizeRequest).subscribe({
+        next: (response) => {
+          console.log(`Vectorización iniciada para ${repoName}:`, response);
+
+          // Monitorear progreso específico de este repositorio
+          if (response.batch_id) {
+            this.monitorRepositoryProgress(response.batch_id, repoName, repoType, resolve, reject);
+          } else {
+            resolve(response);
+          }
+        },
+        error: (error) => {
+          console.error(`Error vectorizando ${repoName}:`, error);
+          reject(error);
+        }
+      });
+    });
+  }
+
+  private monitorRepositoryProgress(batchId: string, repoName: string, repoType: string, resolve: Function, reject: Function) {
+    console.log(`DEBUG: monitorRepositoryProgress iniciado para ${repoName} (${repoType})`);
+    console.log(`DEBUG: repositoryProgress al inicio de monitorRepositoryProgress:`, this.repositoryProgress);
+    console.log(`DEBUG: ¿Existe repositoryProgress[${repoType}]?:`, this.repositoryProgress[repoType] !== undefined);
+
+    const checkProgress = () => {
+      console.log(`DEBUG: checkProgress ejecutándose para ${repoName} (${repoType})`);
+      console.log(`DEBUG: repositoryProgress antes de getBatchStatus:`, this.repositoryProgress);
+
+      this.knowledgeService.getBatchStatus(batchId).subscribe({
+        next: (batch: VectorizationBatch) => {
+          console.log(`DEBUG: Progreso recibido para ${repoName} (${repoType}):`, batch);
+          console.log(`DEBUG: repositoryProgress antes de updateOverallProgress:`, this.repositoryProgress);
+
+          // Actualizar progreso del repositorio específico
+          this.updateOverallProgress(batch, repoType);
+
+          console.log(`DEBUG: repositoryProgress después de updateOverallProgress:`, this.repositoryProgress);
+
+          if (batch.status === 'in_progress') {
+            // Mostrar progreso detallado
+            const repoProgress = this.repositoryProgress[repoType];
+            console.log(`DEBUG: repoProgress obtenido para ${repoType}:`, repoProgress);
+
+            if (repoProgress) {
+              this.vectorizationStatus = `📊 Vectorizando ${repoName}: ${repoProgress.processed}/${repoProgress.total} archivos (${repoProgress.progress}%)`;
+              console.log(`DEBUG: Estado actualizado: ${this.vectorizationStatus}`);
+            } else {
+              console.log(`DEBUG: NO se encontró repoProgress para ${repoType}, usando estado genérico`);
+              this.vectorizationStatus = `📊 Vectorizando ${repoName}...`;
+            }
+
+            // Continuar monitoreando con intervalo más corto para mejor UX
+            setTimeout(() => checkProgress(), 1000);
+          } else if (batch.status === 'completed') {
+            console.log(`DEBUG: ${repoName} (${repoType}) completado exitosamente`);
+            this.vectorizationStatus = `${repoName} vectorizado exitosamente`;
+
+            // Mantener la interfaz visible por un momento antes de resolver
+            setTimeout(() => {
+              resolve(batch);
+            }, 2000);
+          } else if (batch.status === 'failed') {
+            console.error(`DEBUG: Vectorización fallida para ${repoName} (${repoType})`);
+            reject(new Error(`Vectorización fallida para ${repoName}`));
+          }
+        },
+        error: (error) => {
+          console.error(`DEBUG: Error obteniendo progreso de ${repoName} (${repoType}):`, error);
+          reject(error);
+        }
+      });
+    };
+
+    checkProgress();
+  }
+
+  private updateOverallProgress(batch: VectorizationBatch, repoType: string) {
+    console.log(`DEBUG: updateOverallProgress llamado para ${repoType}`);
+    console.log(`DEBUG: batch recibido:`, batch);
+    console.log(`DEBUG: repositoryProgress actual:`, this.repositoryProgress);
+    console.log(`DEBUG: Object.keys(repositoryProgress):`, Object.keys(this.repositoryProgress));
+    console.log(`DEBUG: ¿Existe repositoryProgress[${repoType}]?:`, this.repositoryProgress[repoType] !== undefined);
+
+    console.log(`Actualizando progreso para ${repoType}:`, {
+      processed: batch.processed_files,
+      total: batch.total_files,
+      status: batch.status
+    });
+
+    // Actualizar progreso del repositorio específico
+    if (this.repositoryProgress[repoType]) {
+      this.repositoryProgress[repoType].processed = batch.processed_files || 0;
+      this.repositoryProgress[repoType].total = batch.total_files || 0;
+      this.repositoryProgress[repoType].progress = batch.total_files > 0 ?
+        Math.round((batch.processed_files / batch.total_files) * 100) : 0;
+
+      console.log(`DEBUG: Progreso actualizado para ${repoType}:`, this.repositoryProgress[repoType]);
+    } else {
+      console.error(`ERROR: No se encontró progreso para ${repoType} en repositoryProgress:`, this.repositoryProgress);
+      console.error(`ERROR: repoType: ${repoType}, typeof: ${typeof repoType}`);
+      console.error(`ERROR: repositoryProgress keys:`, Object.keys(this.repositoryProgress));
+    }
+
+    // Forzar detección de cambios para Angular
+    this.vectorizationStatus = this.vectorizationStatus; // Trigger change detection
+  }
+
+
+
+  private showVectorizationSuccess(repoType: string) {
+    // Aquí podrías implementar lógica para mostrar indicadores visuales de éxito
+    // Por ejemplo, cambiar el color del botón, mostrar un checkmark, etc.
+    console.log(`Vectorización exitosa para ${repoType}`);
+
+    // Opcional: Actualizar estadísticas específicas del repositorio
+    setTimeout(() => {
+      this.loadVectorizationStats();
+    }, 1000);
+  }
+
+  // Método para obtener progreso detallado por repositorio
+  getRepositoryProgress(repoType: string): { processed: number; total: number; progress: number } | null {
+    return this.repositoryProgress[repoType] || null;
+  }
+
+  // Método para verificar si un repositorio está siendo vectorizado
+  isRepositoryVectorizing(repoType: string): boolean {
+    return this.isVectorizing && this.repositoryProgress[repoType] !== undefined;
+  }
+
+  // Método para limpiar estado de vectorización
+  private clearVectorizationState() {
+    this.isVectorizing = false;
+    this.vectorizationStatus = '';
+    this.repositoryProgress = {};
+    console.log('Estado de vectorización limpiado');
+  }
+
+  // Método para verificar si se puede iniciar nueva vectorización
+  canStartVectorization(): boolean {
+    return !this.isVectorizing;
+  }
+
+  // Método para vectorizar un repositorio específico (para uso futuro)
+  vectorizeSpecificRepository(repoType: 'nsdk_source' | 'frontend_code' | 'backend_code') {
+    this.configService.getAll().subscribe({
+      next: (configurations: Configuration[]) => {
+        if (configurations.length === 0) {
+          this.snackBar.open('No hay configuraciones disponibles.', 'Cerrar', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+          return;
+        }
+
+        const activeConfig = configurations[0];
+        const configData = activeConfig.config_data;
+        let repoConfig: any = null;
+        let repoName = '';
+
+        // Obtener configuración del repositorio específico
+        switch (repoType) {
+          case 'nsdk_source':
+            if (configData.sourceRepo?.url && configData.sourceRepo?.branch) {
+              repoConfig = {
+                url: configData.sourceRepo.url,
+                branch: configData.sourceRepo.branch,
+                username: configData.sourceRepo.username,
+                token: configData.sourceRepo.token
+              };
+              repoName = 'NSDK (Origen)';
+            }
+            break;
+          case 'frontend_code':
+            if (configData.frontendRepo?.url && configData.frontendRepo?.branch) {
+              repoConfig = {
+                url: configData.frontendRepo.url,
+                branch: configData.frontendRepo.branch,
+                username: configData.frontendRepo.username,
+                token: configData.frontendRepo.token
+              };
+              repoName = 'Frontend Angular';
+            }
+            break;
+          case 'backend_code':
+            if (configData.backendRepo?.url && configData.backendRepo?.branch) {
+              repoConfig = {
+                url: configData.backendRepo.url,
+                branch: configData.backendRepo.branch,
+                username: configData.backendRepo.username,
+                token: configData.backendRepo.token
+              };
+              repoName = 'Backend Spring Boot';
+            }
+            break;
+        }
+
+        if (!repoConfig) {
+          this.snackBar.open(`El repositorio ${repoType} no está configurado.`, 'Cerrar', {
+            duration: 5000,
+            panelClass: ['error-snackbar']
+          });
+          return;
+        }
+
+        // Vectorizar solo este repositorio
+        this.isVectorizing = true;
+        this.vectorizationStatus = `Vectorizando ${repoName}...`;
+
+        this.vectorizeSingleRepository(repoConfig, repoName, repoType)
+          .then((result) => {
+            this.isVectorizing = false;
+            this.vectorizationStatus = `${repoName} vectorizado exitosamente`;
+            this.snackBar.open(`${repoName} vectorizado exitosamente`, 'Cerrar', {
+              duration: 3000,
+              panelClass: ['success-snackbar']
+            });
+
+            // Actualizar estado y refrescar datos
+            this.refreshAllData();
+
+            // Mostrar indicador de éxito en el botón específico
+            this.showVectorizationSuccess(repoType);
+          })
+          .catch((error) => {
+            this.isVectorizing = false;
+            this.vectorizationStatus = `Error vectorizando ${repoName}`;
+            this.snackBar.open(`Error vectorizando ${repoName}: ${error.message}`, 'Cerrar', {
+              duration: 5000,
+              panelClass: ['error-snackbar']
+            });
+          });
+      },
+      error: (error) => {
+        console.error('Error obteniendo configuraciones:', error);
+        this.snackBar.open('Error obteniendo configuración: ' + error.message, 'Cerrar', {
+          duration: 5000,
+          panelClass: ['error-snackbar']
+        });
+      }
+    });
+  }
+
+  // Método anterior eliminado - reemplazado por startMultiRepositoryVectorization
+
   private loadVectorizationStats() {
     this.knowledgeService.getVectorizationStats().subscribe({
       next: (stats: VectorizationStats) => {
         console.log('Estadísticas de vectorización:', stats);
-        // Mapear propiedades del backend a la interfaz local
+
+        // Mapear estadísticas por tipo de repositorio
+        if (stats.by_repository_type) {
+          this.stats.sourceDocuments = stats.by_repository_type.nsdk?.total || 0;
+          this.stats.targetDocuments = stats.by_repository_type.angular?.total || 0;
+          this.stats.backendDocuments = stats.by_repository_type.spring_boot?.total || 0;
+        } else {
+          // Fallback a estadísticas agregadas si no hay separación por tipo
+          this.stats.sourceDocuments = stats.vectorized_files || 0;
+          this.stats.targetDocuments = 0;
+          this.stats.backendDocuments = 0;
+        }
+
+        // Estadísticas agregadas
         this.stats.totalDocuments = stats.total_files || 0;
-        this.stats.sourceDocuments = stats.vectorized_files || 0;
-        this.stats.targetDocuments = 0; // Por ahora
         this.stats.documentationDocuments = 0; // Por ahora
         this.stats.lastUpdated = stats.last_vectorization || 'Nunca';
         this.stats.collectionSize = `${stats.total_files || 0} archivos`;
+
+        console.log('Estadísticas mapeadas:', this.stats);
 
         // Después de cargar estadísticas, cargar documentos
         this.loadDocuments();
@@ -195,49 +696,7 @@ export class KnowledgeComponent implements OnInit {
     });
   }
 
-  private monitorBatchProgress(batchId: string) {
-    const checkProgress = () => {
-      this.knowledgeService.getBatchStatus(batchId).subscribe({
-        next: (batch: VectorizationBatch) => {
-          // Calcular progreso basado en archivos procesados
-          this.vectorizationProgress = batch.total_files > 0 ?
-            Math.round((batch.processed_files / batch.total_files) * 100) : 0;
-          this.processedFiles = batch.processed_files || 0;
-          this.totalFiles = batch.total_files || 0;
 
-          if (batch.status === 'in_progress') {
-            this.vectorizationStatus = 'Procesando archivos NSDK...';
-            // Continuar monitoreando
-            setTimeout(checkProgress, 2000);
-          } else if (batch.status === 'completed') {
-            this.isVectorizing = false;
-            this.vectorizationStatus = 'Vectorización completada';
-            this.snackBar.open('Vectorización completada exitosamente', 'Cerrar', {
-              duration: 3000,
-              panelClass: ['success-snackbar']
-            });
-            // Refrescar todos los datos después de la vectorización
-            this.refreshAllData();
-          } else if (batch.status === 'failed') {
-            this.isVectorizing = false;
-            this.vectorizationStatus = 'Vectorización fallida';
-            // Mensaje de error genérico ya que metadata no está disponible en VectorizationBatch
-            this.snackBar.open('Vectorización fallida: Error en el proceso', 'Cerrar', {
-              duration: 5000,
-              panelClass: ['error-snackbar']
-            });
-          }
-        },
-        error: (error) => {
-          console.error('Error obteniendo estado del lote:', error);
-          this.vectorizationStatus = 'Error obteniendo progreso';
-          setTimeout(checkProgress, 5000); // Reintentar
-        }
-      });
-    };
-
-    checkProgress();
-  }
 
   performSearch() {
     if (!this.searchQuery) return;
@@ -462,7 +921,9 @@ export class KnowledgeComponent implements OnInit {
   getSourceLabel(source: string): string {
     const labels = {
       'nsdk_source': 'NSDK Legacy',
-      'target_code': 'Código Moderno',
+      'frontend_code': 'Frontend Angular',
+      'backend_code': 'Backend Spring Boot',
+      'target_code': 'Código Moderno', // Mantener compatibilidad
       'documentation': 'Documentación'
     };
     return labels[source as keyof typeof labels] || source;
@@ -471,7 +932,9 @@ export class KnowledgeComponent implements OnInit {
   getDocumentIcon(type: string): string {
     const icons = {
       'nsdk_source': 'code',
-      'target_code': 'web',
+      'frontend_code': 'web',
+      'backend_code': 'settings',
+      'target_code': 'web', // Mantener compatibilidad
       'documentation': 'description'
     };
     return icons[type as keyof typeof icons] || 'description';

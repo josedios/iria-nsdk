@@ -6,7 +6,8 @@
         <mat-icon>speed</mat-icon>
         Probar Conexiones
       </button>
-      <button mat-raised-button color="primary" (click)="saveConfiguration()" [disabled]="!configForm.valid || loading">
+      <button mat-raised-button color="primary" (click)="saveConfiguration()"
+        [disabled]="!isFormValidForSaving() || loading">
         <mat-icon>save</mat-icon>
         Guardar Configuración
       </button>

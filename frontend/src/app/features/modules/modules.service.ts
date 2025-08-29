@@ -17,6 +17,7 @@ export interface NSDKModule {
 }
 
 export interface RepositoryTreeNode {
+    id?: string;
     name: string;
     path: string;
     is_file: boolean;
@@ -40,7 +41,7 @@ export interface RepositoryTreeNode {
 
 export interface RepositoryTreeResponse {
     repository_name: string;
-    tree: RepositoryTreeNode;
+    children: RepositoryTreeNode[];
 }
 
 export interface NSDKScreen {
@@ -210,6 +211,20 @@ export class ModulesService {
     }
 
     /**
+   * Obtiene solo un directorio específico para carga lazy
+   */
+  getDirectoryContents(repoName: string, directoryId: string): Observable<RepositoryTreeNode[]> {
+    return this.http.get<RepositoryTreeNode[]>(`${this.apiUrl}/repository-tree/${repoName}/directory/${directoryId}`);
+  }
+
+  /**
+   * Construye la estructura de directorios en BD para un repositorio
+   */
+  buildRepositoryTree(repoName: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/repository-tree/${repoName}/build`, {});
+  }
+
+  /**
    * Sincroniza el análisis de archivos NSDK de un repositorio con la base de datos
    */
   syncRepositoryAnalysis(repoName: string, forceResync: boolean = false): Observable<SyncResponse> {

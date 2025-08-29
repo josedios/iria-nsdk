@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import logging
 from git import Repo, GitCommandError
+from abc import ABC, abstractmethod
 
 from ...domain.entities.nsdk_file import NSDKFile, NSDKFileType, NSDKFileStatus
 from ...domain.entities.vectorization_batch import VectorizationBatch, VectorizationBatchStatus, VectorizationBatchType
@@ -15,17 +16,33 @@ from .repository_manager_service import RepositoryManagerService
 
 logger = logging.getLogger(__name__)
 
-class NSDKVectorizationService:
-    """Servicio para vectorizar archivos NSDK (.SCR, .NCL, .INC, .PRG)"""
+class RepositoryVectorizationService(ABC):
+    """Servicio base abstracto para vectorización de repositorios"""
     
-    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl, 
-                 repository_manager: RepositoryManagerService):
+    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl):
         self.vector_store_service = vector_store_service
         self.llm_service = llm_service
-        self.repository_manager = repository_manager
-        
-        # Almacenamiento en memoria para lotes (temporal)
-        self._batches: Dict[str, VectorizationBatch] = {}
+    
+    @abstractmethod
+    async def vectorize_repository(self, repo_path: str, batch: VectorizationBatch) -> VectorizationBatch:
+        """Vectoriza un repositorio del tipo específico"""
+        pass
+    
+    @abstractmethod
+    def discover_files(self, repo_path: str) -> List[str]:
+        """Descubre archivos relevantes para vectorización"""
+        pass
+    
+    @abstractmethod
+    async def process_file(self, file_path: str) -> Dict[str, Any]:
+        """Procesa un archivo individual"""
+        pass
+
+class NSDKVectorizationService(RepositoryVectorizationService):
+    """Servicio especializado para vectorizar archivos NSDK (.SCR, .NCL, .INC, .PRG)"""
+    
+    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl):
+        super().__init__(vector_store_service, llm_service)
         
         # Patrones para detectar archivos NSDK
         self.nsdk_file_patterns = {
@@ -53,16 +70,621 @@ class NSDKVectorizationService:
             }
         }
     
-    async def vectorize_repository(self, repo_url: str, branch: str = 'main', 
-                           username: Optional[str] = None, token: Optional[str] = None) -> VectorizationBatch:
+    def discover_files(self, repo_path: str) -> List[str]:
+        """Descubre archivos NSDK en el directorio"""
+        nsdk_files = []
+        root_path = Path(repo_path)
+        
+        logger.info(f"Buscando archivos NSDK en: {root_path}")
+        
+        if not root_path.exists():
+            logger.warning(f"El directorio de búsqueda no existe: {root_path}")
+            return []
+        
+        # Buscar archivos NSDK recursivamente
+        for file_path in root_path.rglob('*'):
+            if file_path.is_file():
+                for file_type, pattern in self.nsdk_file_patterns.items():
+                    if re.search(pattern, file_path.name):
+                        nsdk_files.append(str(file_path))
+                        logger.debug(f"Archivo NSDK encontrado: {file_path.name} (tipo: {file_type})")
+                        break
+        
+        logger.info(f"Total de archivos NSDK encontrados: {len(nsdk_files)}")
+        return nsdk_files
+    
+    async def process_file(self, file_path: str) -> Dict[str, Any]:
+        """Procesa un archivo NSDK individual"""
+        try:
+            # Leer contenido del archivo
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Extraer metadatos
+            metadata = self._extract_nsdk_metadata(file_path, content)
+            
+            # Vectorizar contenido
+            vectorization_text = self._create_vectorization_text(file_path, content, metadata)
+            embedding = await self.llm_service.get_embedding(vectorization_text)
+            
+            return {
+                'success': True,
+                'metadata': metadata,
+                'embedding': embedding,
+                'content_preview': content[:1000]  # Primeros 1000 caracteres
+            }
+            
+        except Exception as e:
+            logger.error(f"Error procesando archivo NSDK {file_path}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    async def vectorize_repository(self, repo_path: str, batch: VectorizationBatch) -> VectorizationBatch:
+        """Vectoriza un repositorio NSDK completo"""
+        try:
+            # Descubrir archivos
+            nsdk_files = self.discover_files(repo_path)
+            
+            if not nsdk_files:
+                logger.warning("No se encontraron archivos NSDK para vectorizar")
+                batch.fail_processing("No se encontraron archivos NSDK")
+                return batch
+            
+            # Añadir archivos al lote
+            for file_path in nsdk_files:
+                file_id = str(hash(file_path))
+                batch.add_file(file_id)
+            
+            # Procesar archivos
+            batch.start_processing()
+            logger.info(f"Iniciando procesamiento de {len(nsdk_files)} archivos NSDK")
+            
+            for i, file_path in enumerate(nsdk_files):
+                try:
+                    logger.info(f"Procesando archivo {i+1}/{len(nsdk_files)}: {file_path}")
+                    
+                    result = await self.process_file(file_path)
+                    file_id = str(hash(file_path))
+                    
+                    if result['success']:
+                        batch.mark_file_processed(file_id, success=True)
+                        logger.info(f"Archivo {Path(file_path).name} procesado exitosamente")
+                    else:
+                        batch.mark_file_processed(file_id, success=False)
+                        logger.error(f"Error procesando {Path(file_path).name}: {result['error']}")
+                        
+                except Exception as e:
+                    logger.error(f"Error procesando archivo {file_path}: {str(e)}")
+                    file_id = str(hash(file_path))
+                    batch.mark_file_processed(file_id, success=False)
+            
+            # Completar lote
+            if batch.failed_files > 0:
+                logger.warning(f"Fallaron {batch.failed_files} archivos, marcando lote como fallido")
+                batch.fail_processing(f"Fallaron {batch.failed_files} archivos")
+            else:
+                logger.info("Todos los archivos procesados exitosamente")
+                batch.complete_processing()
+            
+            return batch
+            
+        except Exception as e:
+            logger.error(f"Error en vectorización NSDK: {str(e)}")
+            batch.fail_processing(str(e))
+            return batch
+    
+    def _extract_nsdk_metadata(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Extrae metadatos del contenido NSDK"""
+        metadata = {}
+        file_name = Path(file_path).name
+        
+        # Determinar tipo de archivo
+        file_type = 'unknown'
+        for ext, pattern in self.nsdk_file_patterns.items():
+            if re.search(pattern, file_name):
+                file_type = ext
+                break
+        
+        # Extraer información específica del tipo
+        if file_type in self.nsdk_content_patterns:
+            patterns = self.nsdk_content_patterns[file_type]
+            for key, pattern in patterns.items():
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                if matches:
+                    metadata[key] = matches
+        
+        # Información general
+        metadata['line_count'] = len(content.split('\n'))
+        metadata['char_count'] = len(content)
+        metadata['file_type'] = file_type
+        metadata['file_name'] = file_name
+        
+        return metadata
+    
+    def _create_vectorization_text(self, file_path: str, content: str, metadata: Dict[str, Any]) -> str:
+        """Crea texto optimizado para vectorización"""
+        text_parts = []
+        
+        # Nombre del archivo
+        text_parts.append(f"Archivo: {metadata['file_name']}")
+        
+        # Tipo de archivo
+        text_parts.append(f"Tipo: {metadata['file_type'].upper()}")
+        
+        # Contenido del archivo (limitado para evitar tokens excesivos)
+        lines = content.split('\n')[:2000]
+        content_preview = '\n'.join(lines)
+        text_parts.append(f"Contenido:\n{content_preview}")
+        
+        # Metadatos extraídos
+        for key, value in metadata.items():
+            if key not in ['line_count', 'char_count', 'file_type', 'file_name']:
+                text_parts.append(f"{key}: {value}")
+        
+        return '\n\n'.join(text_parts)
+
+class AngularVectorizationService(RepositoryVectorizationService):
+    """Servicio especializado para vectorizar repositorios Angular"""
+    
+    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl):
+        super().__init__(vector_store_service, llm_service)
+        
+        # Patrones para detectar archivos Angular
+        self.angular_file_patterns = {
+            'typescript': r'\.(ts|TS)$',
+            'javascript': r'\.(js|JS)$',
+            'html': r'\.(html|HTML|htm|HTM)$',
+            'css': r'\.(css|CSS|scss|SCSS|sass|SASS|less|LESS)$',
+            'json': r'\.(json|JSON)$'
+        }
+        
+        # Patrones para extraer información de archivos Angular
+        self.angular_content_patterns = {
+            'typescript': {
+                'class_name': r'class\s+(\w+)',
+                'interface_name': r'interface\s+(\w+)',
+                'function_name': r'function\s+(\w+)|(\w+)\s*\([^)]*\)\s*[:{=]',
+                'imports': r'import\s+([^;]+)',
+                'decorators': r'@(\w+)',
+                'component_name': r'selector:\s*[\'"]([^\'"]+)[\'"]',
+                'angular_modules': r'@NgModule|@Component|@Injectable|@Directive'
+            },
+            'html': {
+                'tags': r'<(\w+)',
+                'attributes': r'(\w+)=["\'][^"\']*["\']',
+                'angular_directives': r'(\*ng[A-Za-z]+|ng[A-Z][a-z]+)',
+                'event_bindings': r'\(([^)]+)\)',
+                'interpolation': r'\{\{([^}]+)\}\}'
+            }
+        }
+    
+    def discover_files(self, repo_path: str) -> List[str]:
+        """Descubre archivos Angular en el directorio"""
+        angular_files = []
+        root_path = Path(repo_path)
+        
+        logger.info(f"Buscando archivos Angular en: {root_path}")
+        
+        if not root_path.exists():
+            logger.warning(f"El directorio de búsqueda no existe: {root_path}")
+            return []
+        
+        # Buscar archivos Angular recursivamente
+        for file_path in root_path.rglob('*'):
+            if file_path.is_file():
+                # Excluir node_modules y otros directorios no relevantes
+                if any(part in ['node_modules', '.git', 'dist', 'build'] for part in file_path.parts):
+                    continue
+                    
+                for file_type, pattern in self.angular_file_patterns.items():
+                    if re.search(pattern, file_path.name):
+                        angular_files.append(str(file_path))
+                        logger.debug(f"Archivo Angular encontrado: {file_path.name} (tipo: {file_type})")
+                        break
+        
+        logger.info(f"Total de archivos Angular encontrados: {len(angular_files)}")
+        return angular_files
+    
+    async def process_file(self, file_path: str) -> Dict[str, Any]:
+        """Procesa un archivo Angular individual"""
+        try:
+            # Leer contenido del archivo
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Extraer metadatos
+            metadata = self._extract_angular_metadata(file_path, content)
+            
+            # Vectorizar contenido
+            vectorization_text = self._create_vectorization_text(file_path, content, metadata)
+            embedding = await self.llm_service.get_embedding(vectorization_text)
+            
+            return {
+                'success': True,
+                'metadata': metadata,
+                'embedding': embedding,
+                'content_preview': content[:1000]  # Primeros 1000 caracteres
+            }
+            
+        except Exception as e:
+            logger.error(f"Error procesando archivo Angular {file_path}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    async def vectorize_repository(self, repo_path: str, batch: VectorizationBatch) -> VectorizationBatch:
+        """Vectoriza un repositorio Angular completo"""
+        try:
+            # Descubrir archivos
+            angular_files = self.discover_files(repo_path)
+            
+            if not angular_files:
+                logger.warning("No se encontraron archivos Angular para vectorizar")
+                batch.fail_processing("No se encontraron archivos Angular")
+                return batch
+            
+            # Añadir archivos al lote
+            for file_path in angular_files:
+                file_id = str(hash(file_path))
+                batch.add_file(file_id)
+            
+            # Procesar archivos
+            batch.start_processing()
+            logger.info(f"Iniciando procesamiento de {len(angular_files)} archivos Angular")
+            
+            for i, file_path in enumerate(angular_files):
+                try:
+                    logger.info(f"Procesando archivo {i+1}/{len(angular_files)}: {file_path}")
+                    
+                    result = await self.process_file(file_path)
+                    file_id = str(hash(file_path))
+                    
+                    if result['success']:
+                        batch.mark_file_processed(file_id, success=True)
+                        logger.info(f"Archivo {Path(file_path).name} procesado exitosamente")
+                    else:
+                        batch.mark_file_processed(file_id, success=False)
+                        logger.error(f"Error procesando {Path(file_path).name}: {result['error']}")
+                        
+                except Exception as e:
+                    logger.error(f"Error procesando archivo {file_path}: {str(e)}")
+                    file_id = str(hash(file_path))
+                    batch.mark_file_processed(file_id, success=False)
+            
+            # Completar lote
+            if batch.failed_files > 0:
+                logger.warning(f"Fallaron {batch.failed_files} archivos, marcando lote como fallido")
+                batch.fail_processing(f"Fallaron {batch.failed_files} archivos")
+            else:
+                logger.info("Todos los archivos procesados exitosamente")
+                batch.complete_processing()
+            
+            return batch
+            
+        except Exception as e:
+            logger.error(f"Error en vectorización Angular: {str(e)}")
+            batch.fail_processing(str(e))
+            return batch
+    
+    def _extract_angular_metadata(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Extrae metadatos del contenido Angular"""
+        metadata = {}
+        file_name = Path(file_path).name
+        file_ext = Path(file_path).suffix.lower()
+        
+        # Determinar tipo de archivo
+        file_type = 'unknown'
+        for ext, pattern in self.angular_file_patterns.items():
+            if re.search(pattern, file_name):
+                file_type = ext
+                break
+        
+        # Extraer información específica del tipo
+        if file_type in self.angular_content_patterns:
+            patterns = self.angular_content_patterns[file_type]
+            for key, pattern in patterns.items():
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                if matches:
+                    metadata[key] = matches
+        
+        # Información general
+        metadata['line_count'] = len(content.split('\n'))
+        metadata['char_count'] = len(content)
+        metadata['file_type'] = file_type
+        metadata['file_name'] = file_name
+        metadata['file_extension'] = file_ext
+        
+        return metadata
+    
+    def _create_vectorization_text(self, file_path: str, content: str, metadata: Dict[str, Any]) -> str:
+        """Crea texto optimizado para vectorización"""
+        text_parts = []
+        
+        # Nombre del archivo
+        text_parts.append(f"Archivo: {metadata['file_name']}")
+        
+        # Tipo de archivo
+        text_parts.append(f"Tipo: {metadata['file_type'].upper()}")
+        
+        # Contenido del archivo (limitado para evitar tokens excesivos)
+        lines = content.split('\n')[:2000]
+        content_preview = '\n'.join(lines)
+        text_parts.append(f"Contenido:\n{content_preview}")
+        
+        # Metadatos extraídos
+        for key, value in metadata.items():
+            if key not in ['line_count', 'char_count', 'file_type', 'file_name', 'file_extension']:
+                text_parts.append(f"{key}: {value}")
+        
+        return '\n\n'.join(text_parts)
+
+class SpringBootVectorizationService(RepositoryVectorizationService):
+    """Servicio especializado para vectorizar repositorios Spring Boot"""
+    
+    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl):
+        super().__init__(vector_store_service, llm_service)
+        
+        # Patrones para detectar archivos Spring Boot
+        self.spring_file_patterns = {
+            'java': r'\.(java|JAVA)$',
+            'xml': r'\.(xml|XML)$',
+            'properties': r'\.(properties|PROPERTIES|yml|YML|yaml|YAML)$',
+            'sql': r'\.(sql|SQL)$',
+            'json': r'\.(json|JSON)$'
+        }
+        
+        # Patrones para extraer información de archivos Spring Boot
+        self.spring_content_patterns = {
+            'java': {
+                'class_name': r'class\s+(\w+)',
+                'interface_name': r'interface\s+(\w+)',
+                'method_name': r'(public|private|protected)?\s*(static\s+)?(\w+)\s+(\w+)\s*\(',
+                'annotations': r'@(\w+)',
+                'package_name': r'package\s+([^;]+)',
+                'spring_annotations': r'@(Controller|Service|Repository|Component|Configuration|Bean)',
+                'dependencies': r'@Autowired|@Value|@Qualifier'
+            },
+            'xml': {
+                'beans': r'<bean[^>]*>',
+                'dependencies': r'<dependency[^>]*>',
+                'spring_config': r'<context:component-scan|@EnableAutoConfiguration'
+            }
+        }
+    
+    def discover_files(self, repo_path: str) -> List[str]:
+        """Descubre archivos Spring Boot en el directorio"""
+        spring_files = []
+        root_path = Path(repo_path)
+        
+        logger.info(f"Buscando archivos Spring Boot en: {root_path}")
+        
+        if not root_path.exists():
+            logger.warning(f"El directorio de búsqueda no existe: {root_path}")
+            return []
+        
+        # Buscar archivos Spring Boot recursivamente
+        for file_path in root_path.rglob('*'):
+            if file_path.is_file():
+                # Excluir directorios no relevantes
+                if any(part in ['.git', 'target', 'build', '.mvn'] for part in file_path.parts):
+                    continue
+                    
+                for file_type, pattern in self.spring_file_patterns.items():
+                    if re.search(pattern, file_path.name):
+                        spring_files.append(str(file_path))
+                        logger.debug(f"Archivo Spring Boot encontrado: {file_path.name} (tipo: {file_type})")
+                        break
+        
+        logger.info(f"Total de archivos Spring Boot encontrados: {len(spring_files)}")
+        return spring_files
+    
+    async def process_file(self, file_path: str) -> Dict[str, Any]:
+        """Procesa un archivo Spring Boot individual"""
+        try:
+            # Leer contenido del archivo
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Extraer metadatos
+            metadata = self._extract_spring_metadata(file_path, content)
+            
+            # Vectorizar contenido
+            vectorization_text = self._create_vectorization_text(file_path, content, metadata)
+            embedding = await self.llm_service.get_embedding(vectorization_text)
+            
+            return {
+                'success': True,
+                'metadata': metadata,
+                'embedding': embedding,
+                'content_preview': content[:1000]  # Primeros 1000 caracteres
+            }
+            
+        except Exception as e:
+            logger.error(f"Error procesando archivo Spring Boot {file_path}: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    async def vectorize_repository(self, repo_path: str, batch: VectorizationBatch) -> VectorizationBatch:
+        """Vectoriza un repositorio Spring Boot completo"""
+        try:
+            # Descubrir archivos
+            spring_files = self.discover_files(repo_path)
+            
+            if not spring_files:
+                logger.warning("No se encontraron archivos Spring Boot para vectorizar")
+                batch.fail_processing("No se encontraron archivos Spring Boot")
+                return batch
+            
+            # Añadir archivos al lote
+            for file_path in spring_files:
+                file_id = str(hash(file_path))
+                batch.add_file(file_id)
+            
+            # Procesar archivos
+            batch.start_processing()
+            logger.info(f"Iniciando procesamiento de {len(spring_files)} archivos Spring Boot")
+            
+            for i, file_path in enumerate(spring_files):
+                try:
+                    logger.info(f"Procesando archivo {i+1}/{len(spring_files)}: {file_path}")
+                    
+                    result = await self.process_file(file_path)
+                    file_id = str(hash(file_path))
+                    
+                    if result['success']:
+                        batch.mark_file_processed(file_id, success=True)
+                        logger.info(f"Archivo {Path(file_path).name} procesado exitosamente")
+                    else:
+                        batch.mark_file_processed(file_id, success=False)
+                        logger.error(f"Error procesando {Path(file_path).name}: {result['error']}")
+                        
+                except Exception as e:
+                    logger.error(f"Error procesando archivo {file_path}: {str(e)}")
+                    file_id = str(hash(file_path))
+                    batch.mark_file_processed(file_id, success=False)
+            
+            # Completar lote
+            if batch.failed_files > 0:
+                logger.warning(f"Fallaron {batch.failed_files} archivos, marcando lote como fallido")
+                batch.fail_processing(f"Fallaron {batch.failed_files} archivos")
+            else:
+                logger.info("Todos los archivos procesados exitosamente")
+                batch.complete_processing()
+            
+            return batch
+            
+        except Exception as e:
+            logger.error(f"Error en vectorización Spring Boot: {str(e)}")
+            batch.fail_processing(str(e))
+            return batch
+    
+    def _extract_spring_metadata(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Extrae metadatos del contenido Spring Boot"""
+        metadata = {}
+        file_name = Path(file_path).name
+        file_ext = Path(file_path).suffix.lower()
+        
+        # Determinar tipo de archivo
+        file_type = 'unknown'
+        for ext, pattern in self.spring_file_patterns.items():
+            if re.search(pattern, file_name):
+                file_type = ext
+                break
+        
+        # Extraer información específica del tipo
+        if file_type in self.spring_content_patterns:
+            patterns = self.spring_content_patterns[file_type]
+            for key, pattern in patterns.items():
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                if matches:
+                    metadata[key] = matches
+        
+        # Información general
+        metadata['line_count'] = len(content.split('\n'))
+        metadata['char_count'] = len(content)
+        metadata['file_type'] = file_type
+        metadata['file_name'] = file_name
+        metadata['file_extension'] = file_ext
+        
+        return metadata
+    
+    def _create_vectorization_text(self, file_path: str, content: str, metadata: Dict[str, Any]) -> str:
+        """Crea texto optimizado para vectorización"""
+        text_parts = []
+        
+        # Nombre del archivo
+        text_parts.append(f"Archivo: {metadata['file_name']}")
+        
+        # Tipo de archivo
+        text_parts.append(f"Tipo: {metadata['file_type'].upper()}")
+        
+        # Contenido del archivo (limitado para evitar tokens excesivos)
+        lines = content.split('\n')[:2000]
+        content_preview = '\n'.join(lines)
+        text_parts.append(f"Contenido:\n{content_preview}")
+        
+        # Metadatos extraídos
+        for key, value in metadata.items():
+            if key not in ['line_count', 'char_count', 'file_type', 'file_name', 'file_extension']:
+                text_parts.append(f"{key}: {value}")
+        
+        return '\n\n'.join(text_parts)
+
+class RepositoryTechnologyDetector:
+    """Detector de tecnología de repositorio"""
+    
+    @staticmethod
+    def detect_technology(repo_path: str) -> str:
         """
-        Vectoriza un repositorio completo de NSDK
+        Detecta la tecnología del repositorio basándose en archivos característicos
+        
+        Returns:
+            str: 'nsdk', 'angular', 'spring-boot', o 'unknown'
+        """
+        root_path = Path(repo_path)
+        
+        if not root_path.exists():
+            return 'unknown'
+        
+        # Buscar archivos característicos de cada tecnología
+        nsdk_indicators = ['*.scr', '*.ncl', '*.inc', '*.prg']
+        angular_indicators = ['package.json', 'angular.json', 'tsconfig.json', '*.ts', '*.component.ts']
+        spring_indicators = ['pom.xml', 'build.gradle', '*.java', 'application.properties', 'application.yml']
+        
+        # Contar indicadores de cada tecnología
+        nsdk_count = sum(len(list(root_path.rglob(pattern))) for pattern in nsdk_indicators)
+        angular_count = sum(len(list(root_path.rglob(pattern))) for pattern in angular_indicators)
+        spring_count = sum(len(list(root_path.rglob(pattern))) for pattern in spring_indicators)
+        
+        logger.info(f"Indicadores encontrados - NSDK: {nsdk_count}, Angular: {angular_count}, Spring Boot: {spring_count}")
+        
+        # Determinar tecnología dominante
+        if nsdk_count > 0 and nsdk_count >= max(angular_count, spring_count):
+            return 'nsdk'
+        elif angular_count > 0 and angular_count >= max(nsdk_count, spring_count):
+            return 'angular'
+        elif spring_count > 0 and spring_count >= max(nsdk_count, angular_count):
+            return 'spring-boot'
+        else:
+            return 'unknown'
+
+class UnifiedVectorizationService:
+    """Servicio unificado que detecta la tecnología y delega en el servicio especializado apropiado"""
+    
+    def __init__(self, vector_store_service: VectorStoreServiceImpl, llm_service: LLMServiceImpl, 
+                 repository_manager: RepositoryManagerService):
+        self.vector_store_service = vector_store_service
+        self.llm_service = llm_service
+        self.repository_manager = repository_manager
+        
+        # Almacenamiento en memoria para lotes (temporal)
+        self._batches: Dict[str, VectorizationBatch] = {}
+        
+        # Inicializar servicios especializados
+        self.nsdk_service = NSDKVectorizationService(vector_store_service, llm_service)
+        self.angular_service = AngularVectorizationService(vector_store_service, llm_service)
+        self.spring_service = SpringBootVectorizationService(vector_store_service, llm_service)
+        
+        # Detector de tecnología
+        self.technology_detector = RepositoryTechnologyDetector()
+    
+    async def vectorize_repository(self, repo_url: str, branch: str = 'main', 
+                           username: Optional[str] = None, token: Optional[str] = None,
+                           force_update: bool = True) -> VectorizationBatch:
+        """
+        Vectoriza un repositorio detectando automáticamente su tecnología
         
         Args:
             repo_url: URL del repositorio
             branch: Rama a procesar
             username: Usuario para autenticación
             token: Token para autenticación
+            force_update: Si es True, fuerza pull del repositorio y limpia vectorización existente
             
         Returns:
             VectorizationBatch: Lote de vectorización creado
@@ -79,40 +701,37 @@ class NSDKVectorizationService:
             # Obtener nombre del repositorio de la URL
             repo_name = repo_url.split('/')[-1].replace('.git', '')
             
-            # Clonar o actualizar repositorio permanentemente
-            logger.info(f"Clonando/actualizando repositorio: {repo_url} (branch: {branch})")
-            repo_path = self.repository_manager.clone_repository(repo_url, repo_name, branch, username, token)
+            # Si force_update es True, limpiar vectorización existente
+            if force_update:
+                logger.info("Force update activado, limpiando vectorización existente...")
+                await self._clear_existing_vectorization()
+                logger.info("Vectorización existente limpiada")
+            
+            # Clonar o actualizar repositorio permanentemente (con pull forzado si force_update)
+            logger.info(f"Clonando/actualizando repositorio: {repo_url} (branch: {branch}, force_update: {force_update})")
+            repo_path = self.repository_manager.clone_repository(
+                repo_url, repo_name, branch, username, token, force_update
+            )
             logger.info(f"Repositorio disponible en: {repo_path}")
             
-            # Encontrar archivos NSDK
-            logger.info(f"Buscando archivos NSDK en: {repo_path}")
-            nsdk_files = self._discover_nsdk_files(str(repo_path))
-            logger.info(f"Encontrados {len(nsdk_files)} archivos NSDK")
-            if nsdk_files:
-                logger.info(f"Primeros 5 archivos: {nsdk_files[:5]}")
+            # Detectar tecnología del repositorio
+            technology = self.technology_detector.detect_technology(str(repo_path))
+            logger.info(f"Tecnología detectada: {technology}")
             
-            # Añadir archivos al lote
-            for file_path in nsdk_files:
-                file_id = str(hash(file_path))
-                batch.add_file(file_id)
-            
-            # Procesar archivos
-            logger.info(f"Iniciando procesamiento del lote {batch.id}")
-            batch.start_processing()
-            logger.info(f"Estado del lote después de start_processing: {batch.status.value}")
-            
-            await self._process_files_batch(nsdk_files, batch)
-            logger.info(f"Estado del lote después de _process_files_batch: {batch.status.value}")
-            logger.info(f"Archivos procesados: {batch.processed_files}, Exitosos: {batch.successful_files}, Fallidos: {batch.failed_files}")
-            
-            if batch.failed_files:
-                logger.warning(f"Fallaron {len(batch.failed_files)} archivos, marcando lote como fallido")
-                batch.fail_processing(f"Fallaron {len(batch.failed_files)} archivos")
+            # Delegar en el servicio especializado apropiado
+            if technology == 'nsdk':
+                logger.info("Usando servicio NSDK para vectorización")
+                await self.nsdk_service.vectorize_repository(str(repo_path), batch)
+            elif technology == 'angular':
+                logger.info("Usando servicio Angular para vectorización")
+                await self.angular_service.vectorize_repository(str(repo_path), batch)
+            elif technology == 'spring-boot':
+                logger.info("Usando servicio Spring Boot para vectorización")
+                await self.spring_service.vectorize_repository(str(repo_path), batch)
             else:
-                logger.info("Todos los archivos procesados exitosamente, marcando lote como completado")
-                batch.complete_processing()
-            
-            logger.info(f"Estado final del lote: {batch.status.value}")
+                logger.warning(f"Tecnología no reconocida: {technology}. Intentando vectorización genérica...")
+                # Intentar vectorización genérica o fallar
+                batch.fail_processing(f"Tecnología no reconocida: {technology}")
             
             # Almacenar el lote en memoria
             self._batches[batch.id] = batch
@@ -151,6 +770,7 @@ class NSDKVectorizationService:
             VectorizationBatch: Lote de vectorización
         """
         try:
+            # Crear lote de vectorización
             batch = VectorizationBatch(
                 name=f"Vectorización del módulo {module_path}",
                 batch_type=VectorizationBatchType.MODULE,
@@ -158,257 +778,85 @@ class NSDKVectorizationService:
                 source_repo_branch=branch
             )
             
-            temp_dir = self._clone_repository(repo_url, branch)
+            # Obtener nombre del repositorio de la URL
+            repo_name = repo_url.split('/')[-1].replace('.git', '')
             
-            try:
-                module_files = self._discover_nsdk_files(temp_dir, module_path)
-                for file_path in module_files:
-                    file_id = str(hash(file_path))
-                    batch.add_file(file_id)
-                
-                batch.start_processing()
-                await self._process_files_batch(module_files, batch)
-                
-                if batch.failed_files:
-                    batch.fail_processing(f"Fallaron {len(batch.failed_files)} archivos")
-                else:
-                    batch.complete_processing()
-                    
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            # Clonar o actualizar repositorio
+            repo_path = self.repository_manager.clone_repository(
+                repo_url, repo_name, branch, None, None, False
+            )
             
+            # Detectar tecnología del repositorio
+            technology = self.technology_detector.detect_technology(str(repo_path))
+            logger.info(f"Tecnología detectada para módulo: {technology}")
+            
+            # Delegar en el servicio especializado apropiado
+            if technology == 'nsdk':
+                logger.info("Usando servicio NSDK para vectorización del módulo")
+                await self.nsdk_service.vectorize_repository(str(repo_path), batch)
+            elif technology == 'angular':
+                logger.info("Usando servicio Angular para vectorización del módulo")
+                await self.angular_service.vectorize_repository(str(repo_path), batch)
+            elif technology == 'spring-boot':
+                logger.info("Usando servicio Spring Boot para vectorización del módulo")
+                await self.spring_service.vectorize_repository(str(repo_path), batch)
+            else:
+                logger.warning(f"Tecnología no reconocida para módulo: {technology}")
+                batch.fail_processing(f"Tecnología no reconocida: {technology}")
+            
+            # Almacenar el lote en memoria
+            self._batches[batch.id] = batch
             return batch
             
         except Exception as e:
             logger.error(f"Error en vectorización del módulo: {str(e)}")
-            batch = VectorizationBatch(
-                name=f"Vectorización fallida del módulo {module_path}",
-                batch_type=VectorizationBatchType.MODULE,
-                source_repo_url=repo_url,
-                source_repo_branch=branch
-            )
-            batch.fail_processing(str(e))
-            return batch
+            if 'batch' in locals():
+                batch.fail_processing(str(e))
+                # Almacenar el lote fallido
+                self._batches[batch.id] = batch
+                return batch
+            else:
+                # Crear lote fallido
+                batch = VectorizationBatch(
+                    name=f"Vectorización fallida del módulo {module_path}",
+                    batch_type=VectorizationBatchType.MODULE,
+                    source_repo_url=repo_url,
+                    source_repo_branch=branch
+                )
+                batch.fail_processing(str(e))
+                # Almacenar el lote fallido
+                self._batches[batch.id] = batch
+                return batch
     
-    def _clone_repository(self, repo_url: str, branch: str, 
-                         username: Optional[str] = None, token: Optional[str] = None) -> str:
-        """Clona un repositorio a un directorio temporal"""
-        temp_dir = tempfile.mkdtemp()
-        
+    async def _clear_existing_vectorization(self):
+        """Limpia la vectorización existente del vector store"""
         try:
-            # Si hay credenciales, usar autenticación en el comando git
-            if username and token:
-                # Construir URL con autenticación
-                if '://' in repo_url:
-                    proto, rest = repo_url.split('://', 1)
-                    # Asegurar que no haya caracteres especiales en username/token
-                    safe_username = username.replace(':', '%3A').replace('@', '%40')
-                    safe_token = token.replace(':', '%3A').replace('@', '%40')
-                    auth_url = f"{proto}://{safe_username}:{safe_token}@{rest}"
+            logger.info("Limpiando vectorización existente...")
+            
+            # Limpiar vector store
+            if hasattr(self, 'vector_store_service') and self.vector_store_service:
+                # Obtener configuración del vector store (asumiendo que está disponible)
+                # Por ahora, usar configuración por defecto
+                config = {
+                    'type': 'faiss',  # Por defecto FAISS
+                    'collectionName': 'nsdk-embeddings'
+                }
+                
+                success = self.vector_store_service.clear_collection(config)
+                if success:
+                    logger.info("Vector store limpiado exitosamente")
                 else:
-                    auth_url = repo_url
-                
-                logger.info(f"Clonando repositorio con autenticación: {auth_url}")
-                Repo.clone_from(auth_url, temp_dir, branch=branch, depth=1)
-            else:
-                # Clonar sin autenticación
-                logger.info(f"Clonando repositorio público: {repo_url}")
-                Repo.clone_from(repo_url, temp_dir, branch=branch, depth=1)
+                    logger.warning("No se pudo limpiar el vector store completamente")
             
-            logger.info(f"Repositorio clonado exitosamente en {temp_dir}")
-            return temp_dir
+            # Limpiar lotes en memoria
+            self._batches.clear()
+            logger.info("Lotes en memoria limpiados")
             
-        except GitCommandError as e:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.error(f"Error de Git al clonar: {str(e)}")
-            raise Exception(f"Error al clonar repositorio: {str(e)}")
-        except Exception as e:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.error(f"Error inesperado al clonar: {str(e)}")
-            raise Exception(f"Error inesperado al clonar repositorio: {str(e)}")
-    
-    def _discover_nsdk_files(self, root_dir: str, module_path: Optional[str] = None) -> List[str]:
-        """Descubre archivos NSDK en el directorio"""
-        nsdk_files = []
-        root_path = Path(root_dir)
-        
-        # Si se especifica un módulo, buscar solo en esa ruta
-        if module_path:
-            search_path = root_path / module_path
-        else:
-            search_path = root_path
-        
-        logger.info(f"Buscando archivos NSDK en: {search_path}")
-        
-        if not search_path.exists():
-            logger.warning(f"El directorio de búsqueda no existe: {search_path}")
-            return []
-        
-        # Buscar archivos NSDK recursivamente
-        for file_path in search_path.rglob('*'):
-            if file_path.is_file():
-                for file_type, pattern in self.nsdk_file_patterns.items():
-                    if re.search(pattern, file_path.name):
-                        nsdk_files.append(str(file_path))
-                        logger.debug(f"Archivo NSDK encontrado: {file_path.name} (tipo: {file_type})")
-                        break
-        
-        logger.info(f"Total de archivos NSDK encontrados: {len(nsdk_files)}")
-        return nsdk_files
-    
-    async def _process_files_batch(self, file_paths: List[str], batch: VectorizationBatch):
-        """Procesa un lote de archivos NSDK"""
-        logger.info(f"Iniciando procesamiento de {len(file_paths)} archivos NSDK")
-        
-        for i, file_path in enumerate(file_paths):
-            try:
-                logger.info(f"Procesando archivo {i+1}/{len(file_paths)}: {file_path}")
-                file_id = str(hash(file_path))
-                
-                # Crear entidad NSDKFile
-                nsdk_file = self._create_nsdk_file(file_path)
-                logger.info(f"Archivo NSDK creado: {nsdk_file.name} (tipo: {nsdk_file.file_type.value})")
-                
-                # Procesar contenido
-                self._process_nsdk_file(nsdk_file)
-                logger.info(f"Contenido procesado para {nsdk_file.name}")
-                
-                # Vectorizar
-                await self._vectorize_nsdk_file(nsdk_file)
-                logger.info(f"Vectorización completada para {nsdk_file.name}")
-                
-                # Marcar como procesado exitosamente
-                batch.mark_file_processed(file_id, success=True)
-                logger.info(f"Archivo {nsdk_file.name} marcado como procesado exitosamente")
-                
-            except Exception as e:
-                logger.error(f"Error procesando archivo {file_path}: {str(e)}")
-                file_id = str(hash(file_path))
-                batch.mark_file_processed(file_id, success=False)
-        
-        logger.info(f"Procesamiento de lote completado. Total: {len(file_paths)}, Exitosos: {batch.successful_files}, Fallidos: {batch.failed_files}")
-    
-    def _create_nsdk_file(self, file_path: str) -> NSDKFile:
-        """Crea una entidad NSDKFile a partir de la ruta del archivo"""
-        path_obj = Path(file_path)
-        file_name = path_obj.name
-        
-        # Determinar tipo de archivo
-        file_type = NSDKFileType.UNKNOWN
-        for ext, pattern in self.nsdk_file_patterns.items():
-            if re.search(pattern, file_name):
-                file_type = NSDKFileType(ext)
-                break
-        
-        # Determinar module_id basado en la estructura de directorios
-        module_id = None
-        if len(path_obj.parts) > 1:
-            # Asumir que el primer directorio después de la raíz es el módulo
-            module_id = path_obj.parts[-2] if len(path_obj.parts) > 2 else path_obj.parts[-1]
-        
-        return NSDKFile(
-            name=file_name,
-            file_path=file_path,
-            file_type=file_type,
-            module_id=module_id
-        )
-    
-    def _process_nsdk_file(self, nsdk_file: NSDKFile):
-        """Procesa el contenido de un archivo NSDK"""
-        try:
-            # Leer contenido del archivo
-            with open(nsdk_file.file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            # Establecer contenido
-            nsdk_file.set_content(content)
-            
-            # Extraer metadatos
-            metadata = self._extract_nsdk_metadata(content, nsdk_file.file_type)
-            nsdk_file.metadata = metadata
-            
-            logger.info(f"Archivo {nsdk_file.name} procesado exitosamente")
+            logger.info("Vectorización existente limpiada completamente")
             
         except Exception as e:
-            logger.error(f"Error procesando contenido de {nsdk_file.name}: {str(e)}")
-            nsdk_file.update_status(NSDKFileStatus.ERROR, str(e))
-            raise
-    
-    def _extract_nsdk_metadata(self, content: str, file_type: NSDKFileType) -> Dict[str, Any]:
-        """Extrae metadatos del contenido NSDK"""
-        metadata = {}
-        
-        if file_type == NSDKFileType.SCR:
-            # Extraer información de pantallas
-            patterns = self.nsdk_content_patterns['scr']
-            for key, pattern in patterns.items():
-                matches = re.findall(pattern, content, re.IGNORECASE)
-                if matches:
-                    metadata[key] = matches
-        
-        elif file_type == NSDKFileType.NCL:
-            # Extraer información de módulos
-            patterns = self.nsdk_content_patterns['ncl']
-            for key, pattern in patterns.items():
-                matches = re.findall(pattern, content, re.IGNORECASE)
-                if matches:
-                    metadata[key] = matches
-        
-        # Información general
-        metadata['line_count'] = len(content.split('\n'))
-        metadata['char_count'] = len(content)
-        metadata['file_type'] = file_type.value
-        
-        return metadata
-    
-    async def _vectorize_nsdk_file(self, nsdk_file: NSDKFile):
-        """Vectoriza un archivo NSDK usando el servicio de embeddings"""
-        try:
-            # Crear texto para vectorización
-            vectorization_text = self._create_vectorization_text(nsdk_file)
-            
-            # Obtener embedding del LLM
-            embedding = await self.llm_service.get_embedding(vectorization_text)
-            
-            if embedding:
-                nsdk_file.set_vector_embedding(embedding)
-                logger.info(f"Archivo {nsdk_file.name} vectorizado exitosamente")
-            else:
-                raise Exception("No se pudo obtener embedding del LLM")
-                
-        except Exception as e:
-            logger.error(f"Error vectorizando {nsdk_file.name}: {str(e)}")
-            nsdk_file.update_status(NSDKFileStatus.ERROR, str(e))
-            raise
-    
-    def _create_vectorization_text(self, nsdk_file: NSDKFile) -> str:
-        """Crea texto optimizado para vectorización"""
-        text_parts = []
-        
-        # Nombre del archivo
-        text_parts.append(f"Archivo: {nsdk_file.name}")
-        
-        # Tipo de archivo
-        text_parts.append(f"Tipo: {nsdk_file.file_type.value.upper()}")
-        
-        # Módulo
-        if nsdk_file.module_id:
-            text_parts.append(f"Módulo: {nsdk_file.module_id}")
-        
-        # Contenido del archivo (limitado para evitar tokens excesivos)
-        if nsdk_file.content:
-            # Limitar a las primeras 2000 líneas para evitar tokens excesivos
-            lines = nsdk_file.content.split('\n')[:2000]
-            content_preview = '\n'.join(lines)
-            text_parts.append(f"Contenido:\n{content_preview}")
-        
-        # Metadatos extraídos
-        if nsdk_file.metadata:
-            for key, value in nsdk_file.metadata.items():
-                if key not in ['line_count', 'char_count', 'file_type']:
-                    text_parts.append(f"{key}: {value}")
-        
-        return '\n\n'.join(text_parts)
+            logger.error(f"Error limpiando vectorización existente: {str(e)}")
+            # No fallar la operación principal por errores de limpieza
     
     async def search_similar_code(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Busca código similar usando el vector store"""
@@ -431,48 +879,6 @@ class NSDKVectorizationService:
             logger.error(f"Error en búsqueda de código similar: {str(e)}")
             return []
     
-    def get_vectorization_stats(self) -> Dict[str, Any]:
-        """Obtiene estadísticas de vectorización basadas en lotes procesados"""
-        try:
-            total_files = 0
-            vectorized_files = 0
-            pending_files = 0
-            error_files = 0
-            last_vectorization = None
-            
-            # Calcular estadísticas desde los lotes almacenados
-            for batch in self._batches.values():
-                total_files += batch.total_files
-                if batch.status == VectorizationBatchStatus.COMPLETED:
-                    vectorized_files += batch.successful_files
-                    error_files += batch.failed_files
-                elif batch.status == VectorizationBatchStatus.IN_PROGRESS:
-                    pending_files += batch.total_files - batch.processed_files
-                elif batch.status == VectorizationBatchStatus.FAILED:
-                    error_files += batch.total_files
-                
-                # Encontrar la última vectorización
-                if batch.completed_at and (last_vectorization is None or batch.completed_at > last_vectorization):
-                    last_vectorization = batch.completed_at
-            
-            return {
-                'total_files': total_files,
-                'vectorized_files': vectorized_files,
-                'pending_files': pending_files,
-                'error_files': error_files,
-                'last_vectorization': last_vectorization.isoformat() if last_vectorization else None
-            }
-            
-        except Exception as e:
-            logger.error(f"Error obteniendo estadísticas: {str(e)}")
-            return {
-                'total_files': 0,
-                'vectorized_files': 0,
-                'pending_files': 0,
-                'error_files': 0,
-                'last_vectorization': None
-            }
-    
     def get_batch_by_id(self, batch_id: str) -> Optional[VectorizationBatch]:
         """
         Obtiene un lote de vectorización por su ID
@@ -484,3 +890,125 @@ class NSDKVectorizationService:
             Optional[VectorizationBatch]: El lote o None si no existe
         """
         return self._batches.get(batch_id)
+    
+    def get_vectorization_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas de vectorización separadas por tipo de repositorio"""
+        try:
+            # Estadísticas agregadas
+            total_files = 0
+            vectorized_files = 0
+            pending_files = 0
+            error_files = 0
+            last_vectorization = None
+            
+            # Estadísticas por tipo de repositorio
+            nsdk_stats = {'total': 0, 'vectorized': 0, 'pending': 0, 'error': 0}
+            angular_stats = {'total': 0, 'vectorized': 0, 'pending': 0, 'error': 0}
+            spring_stats = {'total': 0, 'vectorized': 0, 'pending': 0, 'error': 0}
+            
+            # Calcular estadísticas desde los lotes almacenados
+            for batch in self._batches.values():
+                total_files += batch.total_files
+                
+                if batch.status == VectorizationBatchStatus.COMPLETED:
+                    vectorized_files += batch.successful_files
+                    error_files += batch.failed_files
+                elif batch.status == VectorizationBatchStatus.IN_PROGRESS:
+                    pending_files += batch.total_files - batch.processed_files
+                elif batch.status == VectorizationBatchStatus.FAILED:
+                    error_files += batch.total_files
+                
+                # Encontrar la última vectorización
+                if batch.completed_at and (last_vectorization is None or batch.completed_at > last_vectorization):
+                    last_vectorization = batch.completed_at
+                
+                # Categorizar por tipo de repositorio usando la tecnología detectada
+                # Primero intentar detectar la tecnología del repositorio actual
+                repo_path = None
+                try:
+                    # Obtener el nombre del repositorio de la URL
+                    repo_name = batch.source_repo_url.split('/')[-1].replace('.git', '')
+                    # Construir la ruta del repositorio clonado
+                    repo_path = Path(self.repository_manager.get_repo_path(repo_name))
+                except Exception as e:
+                    logger.warning(f"No se pudo obtener ruta del repositorio {batch.source_repo_url}: {e}")
+                
+                # Detectar tecnología del repositorio
+                technology = 'unknown'
+                if repo_path and repo_path.exists():
+                    technology = self.technology_detector.detect_technology(str(repo_path))
+                    logger.info(f"Tecnología detectada para {batch.source_repo_url}: {technology}")
+                else:
+                    # Fallback: intentar categorizar por nombre de URL
+                    repo_name = batch.source_repo_url.lower()
+                    if 'nsdk' in repo_name or 'source' in repo_name:
+                        technology = 'nsdk'
+                    elif 'angular' in repo_name or 'frontend' in repo_name:
+                        technology = 'angular'
+                    elif 'spring' in repo_name or 'backend' in repo_name or 'java' in repo_name:
+                        technology = 'spring-boot'
+                    logger.info(f"Tecnología inferida por URL para {batch.source_repo_url}: {technology}")
+                
+                # Categorizar estadísticas según la tecnología detectada
+                if technology == 'nsdk':
+                    if batch.status == VectorizationBatchStatus.COMPLETED:
+                        nsdk_stats['vectorized'] += batch.successful_files
+                        nsdk_stats['error'] += batch.failed_files
+                    elif batch.status == VectorizationBatchStatus.IN_PROGRESS:
+                        nsdk_stats['pending'] += batch.total_files - batch.processed_files
+                    elif batch.status == VectorizationBatchStatus.FAILED:
+                        nsdk_stats['error'] += batch.total_files
+                    nsdk_stats['total'] += batch.total_files
+                    logger.info(f"Estadísticas NSDK actualizadas: {nsdk_stats}")
+                elif technology == 'angular':
+                    if batch.status == VectorizationBatchStatus.COMPLETED:
+                        angular_stats['vectorized'] += batch.successful_files
+                        angular_stats['error'] += batch.failed_files
+                    elif batch.status == VectorizationBatchStatus.IN_PROGRESS:
+                        angular_stats['pending'] += batch.total_files - batch.processed_files
+                    elif batch.status == VectorizationBatchStatus.FAILED:
+                        angular_stats['error'] += batch.total_files
+                    angular_stats['total'] += batch.total_files
+                    logger.info(f"Estadísticas Angular actualizadas: {angular_stats}")
+                elif technology == 'spring-boot':
+                    if batch.status == VectorizationBatchStatus.COMPLETED:
+                        spring_stats['vectorized'] += batch.successful_files
+                        spring_stats['error'] += batch.failed_files
+                    elif batch.status == VectorizationBatchStatus.IN_PROGRESS:
+                        spring_stats['pending'] += batch.total_files - batch.processed_files
+                    elif batch.status == VectorizationBatchStatus.FAILED:
+                        spring_stats['error'] += batch.total_files
+                    spring_stats['total'] += batch.total_files
+                    logger.info(f"Estadísticas Spring Boot actualizadas: {spring_stats}")
+                else:
+                    logger.warning(f"Tecnología no reconocida '{technology}' para {batch.source_repo_url}, no se categorizan estadísticas")
+            
+            logger.info(f"Estadísticas finales - NSDK: {nsdk_stats}, Angular: {angular_stats}, Spring Boot: {spring_stats}")
+            
+            return {
+                'total_files': total_files,
+                'vectorized_files': vectorized_files,
+                'pending_files': pending_files,
+                'error_files': error_files,
+                'last_vectorization': last_vectorization.isoformat() if last_vectorization else None,
+                'by_repository_type': {
+                    'nsdk': nsdk_stats,
+                    'angular': angular_stats,
+                    'spring_boot': spring_stats
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {str(e)}")
+            return {
+                'total_files': 0,
+                'vectorized_files': 0,
+                'pending_files': 0,
+                'error_files': 0,
+                'last_vectorization': None,
+                'by_repository_type': {
+                    'nsdk': {'total': 0, 'vectorized': 0, 'pending': 0, 'error': 0},
+                    'angular': {'total': 0, 'vectorized': 0, 'pending': 0, 'error': 0},
+                    'spring_boot': {'total': 0, 'vectorized': 0, 'pending': 0, 'error': 0}
+                }
+            }

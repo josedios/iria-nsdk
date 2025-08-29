@@ -46,6 +46,26 @@ export interface VectorizationStats {
     pending_files: number;
     error_files: number;
     last_vectorization?: string;
+    by_repository_type?: {
+        nsdk: {
+            total: number;
+            vectorized: number;
+            pending: number;
+            error: number;
+        };
+        angular: {
+            total: number;
+            vectorized: number;
+            pending: number;
+            error: number;
+        };
+        spring_boot: {
+            total: number;
+            vectorized: number;
+            pending: number;
+            error: number;
+        };
+    };
 }
 
 export interface SearchResult {

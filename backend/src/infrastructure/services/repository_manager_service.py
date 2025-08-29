@@ -32,15 +32,20 @@ class RepositoryManagerService:
         """Obtiene la ruta del repositorio clonado"""
         return self.repositories_dir / repo_name
     
+    def get_repo_path(self, repo_name: str) -> Path:
+        """Alias para get_repository_path para mantener compatibilidad"""
+        return self.get_repository_path(repo_name)
+    
     def is_repository_cloned(self, repo_name: str) -> bool:
         """Verifica si un repositorio ya está clonado"""
         repo_path = self.get_repository_path(repo_name)
         return repo_path.exists() and (repo_path / ".git").exists()
     
     def clone_repository(self, repo_url: str, repo_name: str, branch: str = 'main',
-                        username: Optional[str] = None, token: Optional[str] = None) -> Path:
+                        username: Optional[str] = None, token: Optional[str] = None, 
+                        force_update: bool = False) -> Path:
         """
-        Clona un repositorio permanentemente
+        Clona un repositorio permanentemente o lo actualiza si ya existe
         
         Args:
             repo_url: URL del repositorio
@@ -48,6 +53,7 @@ class RepositoryManagerService:
             branch: Rama a clonar
             username: Usuario para autenticación
             token: Token para autenticación
+            force_update: Si es True, fuerza actualización incluso si ya existe
             
         Returns:
             Path: Ruta del repositorio clonado
@@ -55,10 +61,14 @@ class RepositoryManagerService:
         try:
             repo_path = self.get_repository_path(repo_name)
             
-            # Si ya existe, hacer pull en lugar de clonar
-            if self.is_repository_cloned(repo_name):
-                logger.info(f"Repositorio {repo_name} ya existe, actualizando...")
+            # Si ya existe y force_update es True, hacer pull forzado
+            if self.is_repository_cloned(repo_name) and force_update:
+                logger.info(f"Repositorio {repo_name} ya existe, forzando actualización...")
                 return self.update_repository(repo_name, branch)
+            # Si ya existe pero no se fuerza actualización, solo verificar
+            elif self.is_repository_cloned(repo_name):
+                logger.info(f"Repositorio {repo_name} ya existe, usando versión actual")
+                return repo_path
             
             # Construir URL con credenciales si se proporcionan
             if username and token:
@@ -241,79 +251,187 @@ class RepositoryManagerService:
             logger.error(f"Error obteniendo módulos NSDK de {repo_name}: {str(e)}")
             return []
     
-    def get_repository_tree(self, repo_name: str) -> Dict[str, Any]:
-        """
-        Genera una estructura de árbol completa del repositorio
-        
-        Returns:
-            Estructura de árbol con directorios y archivos
-        """
+    def get_repository_tree(self, repository_name: str) -> Optional[Dict[str, Any]]:
+        """Obtiene la estructura de árbol completa de un repositorio"""
         try:
-            repo_path = self.get_repository_path(repo_name)
-            if not self.is_repository_cloned(repo_name):
-                return {}
+            repo_path = self.get_repository_path(repository_name)
+            if not repo_path.exists():
+                logger.warning(f"Repositorio {repository_name} no encontrado en {repo_path}")
+                return None
             
-            def build_tree(path: Path, current_depth: int = 0, max_depth: int = 10) -> Dict[str, Any]:
-                """Construye recursivamente la estructura del árbol"""
-                if current_depth > max_depth:
-                    return {}
-                
-                result = {
-                    'name': path.name,
-                    'path': str(path.relative_to(repo_path)),
-                    'is_file': path.is_file(),
-                    'is_dir': path.is_dir(),
-                    'depth': current_depth,
-                    'children': [],
-                    'type': 'directory' if path.is_dir() else self._get_file_type(path)
-                }
-                
-                if path.is_dir():
-                    # Agregar información del directorio
-                    try:
-                        items = list(path.iterdir())
-                        result['file_count'] = len([x for x in items if x.is_file()])
-                        result['dir_count'] = len([x for x in items if x.is_dir()])
-                        
-                        # Procesar subdirectorios y archivos
-                        for item in sorted(items, key=lambda x: (x.is_file(), x.name.lower())):
-                            if item.name.startswith('.'):  # Ignorar archivos ocultos
-                                continue
-                            
-                            child = build_tree(item, current_depth + 1, max_depth)
-                            if child:
-                                result['children'].append(child)
-                    except PermissionError:
-                        logger.warning(f"Sin permisos para acceder a {path}")
-                        result['file_count'] = 0
-                        result['dir_count'] = 0
-                
-                elif path.is_file():
-                    # Agregar información del archivo
-                    try:
-                        result['size_kb'] = round(path.stat().st_size / 1024, 2)
-                        result['extension'] = path.suffix.lower()
-                        
-                        # Si es un archivo NSDK, agregar información específica
-                        if path.suffix.lower() in ['.ncl', '.scr', '.inc', '.prg']:
-                            nsdk_info = self._get_nsdk_file_info(path)
-                            result.update(nsdk_info)
-                            logger.debug(f"Información NSDK extraída para {path}: {nsdk_info}")
-                    except PermissionError:
-                        logger.warning(f"Sin permisos para acceder a {path}")
-                    except Exception as e:
-                        logger.warning(f"Error procesando archivo {path}: {str(e)}")
-                
-                return result
-            
-            # Construir el árbol desde la raíz del repositorio
-            tree = build_tree(repo_path)
-            logger.info(f"Árbol del repositorio {repo_name} generado exitosamente")
-            return tree
+            # Construir árbol solo con la raíz y primer nivel
+            root_tree = self._build_tree_root_only(repo_path)
+            logger.info(f"Árbol raíz del repositorio {repository_name} construido")
+            return root_tree
             
         except Exception as e:
-            logger.error(f"Error generando árbol del repositorio {repo_name}: {str(e)}")
-            return {}
+            logger.error(f"Error construyendo árbol del repositorio {repository_name}: {str(e)}")
+            return None
+
+    def get_directory_contents(self, repository_name: str, directory_path: str) -> Optional[List[Dict[str, Any]]]:
+        """Obtiene solo el contenido de un directorio específico para carga lazy"""
+        try:
+            repo_path = self.get_repository_path(repository_name)
+            if not repo_path.exists():
+                logger.warning(f"Repositorio {repository_name} no encontrado en {repo_path}")
+                return None
+            
+            # Construir ruta completa del directorio
+            full_path = repo_path / directory_path
+            if not full_path.exists() or not full_path.is_dir():
+                logger.warning(f"Directorio {directory_path} no encontrado en {repository_name}")
+                return None
+            
+            # Construir árbol solo para este directorio
+            directory_tree = self._build_tree_for_directory(full_path, directory_path)
+            logger.info(f"Contenido del directorio {directory_path} en {repository_name} cargado")
+            return directory_tree
+            
+        except Exception as e:
+            logger.error(f"Error cargando contenido del directorio {directory_path} en {repository_name}: {str(e)}")
+            return None
+
+    def _build_tree_root_only(self, path: Path) -> Dict[str, Any]:
+        """Construye solo el árbol raíz sin cargar subdirectorios"""
+        try:
+            result = {
+                'name': path.name,
+                'path': str(path.relative_to(path.parents[-1])),
+                'is_file': path.is_file(),
+                'is_dir': path.is_dir(),
+                'depth': 0,
+                'children': [],
+                'type': self._get_file_type(path),
+                'file_count': 0,
+                'dir_count': 0
+            }
+            
+            if path.is_dir():
+                # Solo contar archivos y directorios, no cargarlos
+                try:
+                    items = list(path.iterdir())
+                    result['file_count'] = len([item for item in items if item.is_file()])
+                    result['dir_count'] = len([item for item in items if item.is_dir()])
+                    
+                    # Solo agregar directorios como placeholder (sin contenido)
+                    for item in items:
+                        if item.is_dir():
+                            result['children'].append({
+                                'name': item.name,
+                                'path': str(item.relative_to(path.parents[-1])),
+                                'is_file': False,
+                                'is_dir': True,
+                                'depth': 1,
+                                'children': [],  # Vacío, se cargará cuando se expanda
+                                'type': 'directory',
+                                'file_count': 0,  # Se calculará cuando se expanda
+                                'dir_count': 0,   # Se calculará cuando se expanda
+                                'is_placeholder': True  # Marca que es un placeholder
+                            })
+                except PermissionError:
+                    logger.warning(f"Sin permisos para acceder a {path}")
+                    result['children'] = []
+                    
+            elif path.is_file():
+                # Para archivos, obtener información básica
+                file_info = self._get_nsdk_file_info(path)
+                result.update(file_info)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error construyendo árbol raíz para {path}: {str(e)}")
+            return {
+                'name': path.name,
+                'path': str(path),
+                'is_file': False,
+                'is_dir': False,
+                'depth': 0,
+                'children': [],
+                'type': 'other',
+                'error': str(e)
+            }
+
+    def _build_tree_for_directory(self, path: Path, relative_path: str) -> List[Dict[str, Any]]:
+        """Construye el árbol solo para un directorio específico"""
+        try:
+            children = []
+            
+            try:
+                items = list(path.iterdir())
+                for item in items:
+                    # Calcular la ruta relativa correctamente
+                    try:
+                        # Usar la ruta del repositorio como base para calcular la ruta relativa
+                        repo_path = self.get_repository_path(path.parts[-2])  # Obtener el nombre del repo
+                        if repo_path and repo_path.exists():
+                            relative_item_path = str(item.relative_to(repo_path))
+                        else:
+                            # Fallback: usar la ruta del directorio actual
+                            relative_item_path = str(item.relative_to(path.parent))
+                    except ValueError:
+                        # Si no se puede calcular la ruta relativa, usar la ruta completa
+                        relative_item_path = str(item)
+                    
+                    child = {
+                        'name': item.name,
+                        'path': relative_item_path,
+                        'is_file': item.is_file(),
+                        'is_dir': item.is_dir(),
+                        'depth': 1,  # Profundidad fija para este nivel
+                        'children': [],
+                        'type': self._get_file_type(item),
+                        'file_count': 0,
+                        'dir_count': 0
+                    }
+                    
+                    if item.is_dir():
+                        # Para directorios, contar archivos y subdirectorios
+                        try:
+                            sub_items = list(item.iterdir())
+                            child['file_count'] = len([sub_item for sub_item in sub_items if sub_item.is_file()])
+                            child['dir_count'] = len([sub_item for sub_item in sub_items if sub_item.is_dir()])
+                            
+                            # Agregar subdirectorios como placeholder
+                            for sub_item in sub_items:
+                                if sub_item.is_dir():
+                                    try:
+                                        sub_relative_path = str(sub_item.relative_to(repo_path)) if repo_path else str(sub_item)
+                                    except ValueError:
+                                        sub_relative_path = str(sub_item)
+                                        
+                                    child['children'].append({
+                                        'name': sub_item.name,
+                                        'path': sub_relative_path,
+                                        'is_file': False,
+                                        'is_dir': True,
+                                        'depth': 2,
+                                        'children': [],
+                                        'type': 'directory',
+                                        'file_count': 0,
+                                        'dir_count': 0,
+                                        'is_placeholder': True
+                                    })
+                        except PermissionError:
+                            logger.warning(f"Sin permisos para acceder a {item}")
+                            child['children'] = []
+                            
+                    elif item.is_file():
+                        # Para archivos, obtener información NSDK
+                        file_info = self._get_nsdk_file_info(item)
+                        child.update(file_info)
+                    
+                    children.append(child)
+                    
+            except PermissionError:
+                logger.warning(f"Sin permisos para acceder a {path}")
+                return []
+            
+            return children
+            
+        except Exception as e:
+            logger.error(f"Error construyendo árbol para directorio {path}: {str(e)}")
+            return []
     
     def _get_file_type(self, file_path: Path) -> str:
         """Determina el tipo de archivo"""

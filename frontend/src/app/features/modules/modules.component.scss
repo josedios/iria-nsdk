@@ -112,23 +112,21 @@
 .node-content {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex: 1;
-  flex-wrap: wrap;
-  min-width: 0; // Permite que se contraiga si es necesario
+  min-width: 0;
+}
+
+.node-loading {
+  margin-left: 8px;
+  color: #1976d2;
 }
 
 .node-icon {
-  font-size: 24px;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  padding: 4px;
-  transition: all 0.3s ease;
-  flex-shrink: 0; // Evita que el icono se contraiga
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .node-icon.node-type-directory {

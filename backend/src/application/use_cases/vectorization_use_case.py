@@ -1,39 +1,42 @@
 from typing import List, Dict, Any, Optional
 import logging
 from ...domain.entities.vectorization_batch import VectorizationBatch
-from ...infrastructure.services.nsdk_vectorization_service import NSDKVectorizationService
+from ...infrastructure.services.nsdk_vectorization_service import UnifiedVectorizationService
 
 logger = logging.getLogger(__name__)
 
 class VectorizationUseCase:
-    """Caso de uso para la vectorización de archivos NSDK"""
+    """Caso de uso para la vectorización de repositorios"""
     
-    def __init__(self, nsdk_vectorization_service: NSDKVectorizationService):
-        self.nsdk_vectorization_service = nsdk_vectorization_service
+    def __init__(self, unified_vectorization_service: UnifiedVectorizationService):
+        self.unified_vectorization_service = unified_vectorization_service
     
     async def vectorize_repository(self, repo_url: str, branch: str = 'main',
-                           username: Optional[str] = None, token: Optional[str] = None) -> VectorizationBatch:
+                           username: Optional[str] = None, token: Optional[str] = None,
+                           force_update: bool = True) -> VectorizationBatch:
         """
-        Vectoriza un repositorio completo de NSDK
+        Vectoriza un repositorio completo de NSDK con pull forzado y limpieza previa
         
         Args:
             repo_url: URL del repositorio
             branch: Rama a procesar
             username: Usuario para autenticación
             token: Token para autenticación
+            force_update: Si es True, fuerza pull del repositorio y limpia vectorización existente
             
         Returns:
             VectorizationBatch: Lote de vectorización
         """
         try:
-            logger.info(f"Iniciando vectorización del repositorio: {repo_url}")
+            logger.info(f"Iniciando vectorización del repositorio: {repo_url} (force_update: {force_update})")
             
-            # Ejecutar vectorización
-            batch = await self.nsdk_vectorization_service.vectorize_repository(
+            # Ejecutar vectorización con pull forzado y limpieza
+            batch = await self.unified_vectorization_service.vectorize_repository(
                 repo_url=repo_url,
                 branch=branch,
                 username=username,
-                token=token
+                token=token,
+                force_update=force_update
             )
             
             logger.info(f"Vectorización completada. Estado: {batch.status.value}")
@@ -66,7 +69,7 @@ class VectorizationUseCase:
             logger.info(f"Iniciando vectorización del módulo: {module_path}")
             
             # Ejecutar vectorización del módulo
-            batch = await self.nsdk_vectorization_service.vectorize_module(
+            batch = await self.unified_vectorization_service.vectorize_module(
                 module_path=module_path,
                 repo_url=repo_url,
                 branch=branch
@@ -101,7 +104,7 @@ class VectorizationUseCase:
             logger.info(f"Buscando código similar para: {query}")
             
             # Ejecutar búsqueda
-            results = await self.nsdk_vectorization_service.search_similar_code(
+            results = await self.unified_vectorization_service.search_similar_code(
                 query=query,
                 limit=limit
             )
@@ -124,7 +127,7 @@ class VectorizationUseCase:
             logger.info("Obteniendo estadísticas de vectorización")
             
             # Obtener estadísticas
-            stats = self.nsdk_vectorization_service.get_vectorization_stats()
+            stats = self.unified_vectorization_service.get_vectorization_stats()
             
             logger.info("Estadísticas obtenidas exitosamente")
             return stats
@@ -154,7 +157,7 @@ class VectorizationUseCase:
             logger.info(f"Obteniendo estado del lote: {batch_id}")
             
             # Buscar el lote en el servicio de vectorización
-            batch = self.nsdk_vectorization_service.get_batch_by_id(batch_id)
+            batch = self.unified_vectorization_service.get_batch_by_id(batch_id)
             
             if batch:
                 # Convertir a diccionario para la respuesta

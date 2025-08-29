@@ -40,6 +40,7 @@ interface ModuleNode {
   fields?: string[];
   button_count?: number;
   buttons?: string[];
+  isLoading?: boolean; // Nuevo campo para indicar si se está cargando el contenido
 }
 
 interface FlatNode {
@@ -67,6 +68,7 @@ interface FlatNode {
   fields?: string[];
   button_count?: number;
   buttons?: string[];
+  isLoading?: boolean; // Nuevo campo para indicar si se está cargando el contenido
 }
 
 interface AnalysisData {
@@ -144,7 +146,8 @@ export class ModulesComponent implements OnInit {
       field_count: node.field_count,
       fields: node.fields,
       button_count: node.button_count,
-      buttons: node.buttons
+      buttons: node.buttons,
+      isLoading: node.isLoading || false
     };
   };
 
@@ -245,23 +248,31 @@ export class ModulesComponent implements OnInit {
     this.isLoading = true;
     this.errorMessage = '';
 
-    // Usar getRepositoryTree que es mucho más rápido que syncRepositoryAnalysis
-    this.loadRepositoryTree();
+    // Cargar solo la raíz del repositorio
+    this.loadRepositoryRoot();
   }
 
   /**
-   * Carga la estructura del árbol del repositorio
+   * Carga solo la raíz del repositorio
    */
-  loadRepositoryTree() {
+  loadRepositoryRoot() {
     this.isLoading = true;
     this.errorMessage = '';
 
     this.modulesService.getRepositoryTree('nsdk-sources').subscribe({
       next: (response) => {
-        console.log('Árbol del repositorio cargado:', response);
+        console.log('=== RESPUESTA COMPLETA DEL BACKEND ===');
+        console.log('Response completo:', response);
+        console.log('Response.children:', response.children);
+        console.log('Response.children.length:', response.children?.length);
+        console.log('Response.children[0]:', response.children?.[0]);
+        console.log('=== FIN RESPUESTA ===');
         
         // Convertir la respuesta del árbol a ModuleNode[]
-        const treeData = this.convertTreeToModuleNodes(response.tree);
+        const treeData = this.convertTreeToModuleNodes(response.children || []);
+        console.log('TreeData convertido:', treeData);
+        console.log('TreeData.length:', treeData.length);
+        
         this.dataSource.data = treeData;
         this.isLoading = false;
         
@@ -269,28 +280,110 @@ export class ModulesComponent implements OnInit {
         this.loadAnalysisInBackground();
       },
       error: (error) => {
-        console.error('Error cargando árbol del repositorio:', error);
+        console.error('Error cargando raíz del repositorio:', error);
         this.errorMessage = 'Error al cargar la estructura del repositorio';
         this.isLoading = false;
-        
-        // Fallback: intentar cargar análisis existentes
-        this.loadAnalysisFromDatabase();
       }
     });
   }
 
   /**
+   * Carga el contenido de un directorio cuando se expande
+   */
+  loadDirectoryContents(node: FlatNode) {
+    if (!node.is_dir || node.expandable) {
+      return; // Ya está cargado o no es un directorio
+    }
+
+    // Marcar como cargando
+    node.isLoading = true;
+    
+    // Obtener la ruta del directorio
+    const directoryPath = node.path;
+    
+    this.modulesService.getDirectoryContents('nsdk-sources', directoryPath).subscribe({
+      next: (directoryContents) => {
+        console.log(`Contenido del directorio ${directoryPath} cargado:`, directoryContents);
+        
+        // Convertir el contenido del directorio a ModuleNode[]
+        const children = this.convertTreeToModuleNodes(directoryContents);
+        
+        // Encontrar el nodo en el árbol y actualizar sus hijos
+        this.updateNodeChildren(node, children);
+        
+        // Actualizar el dataSource
+        this.dataSource.data = [...this.dataSource.data];
+        
+        node.isLoading = false;
+      },
+      error: (error) => {
+        console.error(`Error cargando contenido del directorio ${directoryPath}:`, error);
+        node.isLoading = false;
+        
+        // Mostrar error en el nodo
+        this.snackBar.open(`Error al cargar el directorio ${node.name}`, 'Cerrar', { duration: 3000 });
+      }
+    });
+  }
+
+  /**
+   * Actualiza los hijos de un nodo en el árbol
+   */
+  private updateNodeChildren(node: FlatNode, children: ModuleNode[]) {
+    // Encontrar el índice del nodo en el dataSource
+    const nodeIndex = this.dataSource.data.findIndex(n => n.path === node.path);
+    if (nodeIndex === -1) return;
+    
+    // Convertir los hijos a FlatNode[]
+    const flatChildren: FlatNode[] = children.map((child, index) => ({
+      expandable: !!(child.children && child.children.length > 0),
+      name: child.name,
+      type: child.type,
+      status: child.status,
+      level: node.level + 1,
+      path: child.path,
+      is_file: child.is_file,
+      is_dir: child.is_dir,
+      file_count: child.file_count,
+      dir_count: child.dir_count,
+      size_kb: child.size_kb,
+      extension: child.extension,
+      line_count: child.line_count,
+      char_count: child.char_count,
+      function_count: child.function_count,
+      functions: child.functions || [],
+      field_count: child.field_count,
+      fields: child.fields || [],
+      button_count: child.button_count,
+      buttons: child.buttons || [],
+      isLoading: false
+    }));
+    
+    // Insertar los hijos después del nodo actual
+    const newData = [...this.dataSource.data];
+    newData.splice(nodeIndex + 1, 0, ...flatChildren);
+    
+    // Actualizar el dataSource
+    this.dataSource.data = newData;
+    
+    // Marcar el nodo como expandible
+    node.expandable = true;
+  }
+
+  /**
    * Convierte un RepositoryTreeNode a ModuleNode[]
    */
-  convertTreeToModuleNodes(treeNode: RepositoryTreeNode): ModuleNode[] {
+  convertTreeToModuleNodes(treeNode: RepositoryTreeNode | RepositoryTreeNode[]): ModuleNode[] {
     const result: ModuleNode[] = [];
     
-    if (treeNode.children && treeNode.children.length > 0) {
-      for (const child of treeNode.children) {
+    // Si es un array, procesar cada elemento
+    if (Array.isArray(treeNode)) {
+      for (const child of treeNode) {
         const moduleNode: ModuleNode = {
           name: child.name,
           type: child.type,
           path: child.path,
+          id: child.id,
           is_file: child.is_file,
           is_dir: child.is_dir,
           file_count: child.file_count,
@@ -305,12 +398,9 @@ export class ModulesComponent implements OnInit {
           fields: child.fields || [],
           button_count: child.button_count,
           buttons: child.buttons || [],
-          status: 'analyzed' // Asumimos que si está en el árbol, ya está analizado
+          status: 'analyzed',
+          children: []
         };
-        
-        if (child.children && child.children.length > 0) {
-          moduleNode.children = this.convertTreeToModuleNodes(child);
-        }
         
         result.push(moduleNode);
       }
@@ -347,8 +437,8 @@ export class ModulesComponent implements OnInit {
         console.log('Análisis sincronizado:', response);
         this.isLoadingAnalysis = false;
         
-        // Recargar el árbol después de la sincronización
-        this.loadRepositoryTree();
+        // Recargar la raíz después de la sincronización
+        this.loadRepositoryRoot();
       },
       error: (error) => {
         console.error('Error sincronizando análisis:', error);
@@ -624,6 +714,37 @@ export class ModulesComponent implements OnInit {
    */
   refreshModules() {
     this.syncAnalysisWithDatabase();
+  }
+
+  /**
+   * Construye la estructura de directorios en BD
+   */
+  buildDirectoryTree() {
+    console.log('Construyendo estructura de directorios...');
+    
+    this.modulesService.buildRepositoryTree('nsdk-sources').subscribe({
+      next: (response) => {
+        console.log('Estructura de directorios construida:', response);
+        this.snackBar.open(
+          `Estructura de directorios construida. Root ID: ${response.root_directory_id}`,
+          'Cerrar',
+          { duration: 5000 }
+        );
+        
+        // Recargar módulos después de construir la estructura
+        setTimeout(() => {
+          this.loadModulesFromBackend();
+        }, 2000);
+      },
+      error: (error) => {
+        console.error('Error construyendo estructura de directorios:', error);
+        this.snackBar.open(
+          'Error al construir la estructura de directorios',
+          'Cerrar',
+          { duration: 5000 }
+        );
+      }
+    });
   }
 
   vectorizeCode() {

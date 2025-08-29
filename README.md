@@ -1,4 +1,4 @@
-# 🚀 Iria - NSDK Migration Platform - Plataforma de Migración NSDK
+# 🚀 IRIA - NSDK Migration Platform
 
 Una plataforma completa para migrar aplicaciones legacy desarrolladas en NSDK hacia una arquitectura moderna con **Angular** (frontend) y **Spring Boot** (backend), asistida con IA.
 
@@ -12,7 +12,7 @@ Una plataforma completa para migrar aplicaciones legacy desarrolladas en NSDK ha
 - **Análisis Inteligente** de código NSDK con IA
 - **Generación de Código** Angular y Spring Boot
 
-## 🏗 Arquitectura del Sistema
+## 🏗️ Arquitectura del Sistema
 
 ### Backend (FastAPI + Arquitectura Hexagonal)
 ```
@@ -81,10 +81,11 @@ pip install -r requirements.txt
 3. **Configurar base de datos**
 ```bash
 # Crear base de datos PostgreSQL
-createdb prompt_maestro
+createdb iria_nsdk
 
 # Ejecutar migraciones
-alembic upgrade head
+psql -h localhost -U postgres -d iria_nsdk
+\i migrations/01_complete_schema_fallback.sql
 ```
 
 4. **Configurar variables de entorno**
@@ -115,6 +116,21 @@ npm start
 ```
 http://localhost:4200
 ```
+
+## 🗄️ Base de Datos
+
+### Esquema Consolidado
+El proyecto incluye un esquema de base de datos unificado en `backend/migrations/`:
+
+- **`01_complete_schema.sql`** - Esquema principal (requiere extensión uuid-ossp)
+- **`01_complete_schema_fallback.sql`** - Esquema alternativo (usa funciones nativas)
+
+### Tablas Principales
+1. **`configurations`** - Configuraciones del sistema
+2. **`nsdk_directories`** - Estructura jerárquica de directorios NSDK
+3. **`nsdk_file_analyses`** - Análisis detallado de archivos NSDK
+4. **`nsdk_sync_logs`** - Logs de sincronización
+5. **`nsdk_repository_metadata`** - Metadatos de repositorios
 
 ## 📊 Flujos Principales
 
@@ -230,8 +246,8 @@ ng e2e
 
 - **API Documentation**: http://localhost:8000/docs
 - **Frontend Storybook**: http://localhost:6006
-- **Architecture Guide**: docs/architecture/
-- **API Reference**: docs/api/
+- **Backend README**: [backend/README.md](backend/README.md)
+- **Frontend README**: [frontend/README.md](frontend/README.md)
 
 ## 🤝 Contribución
 
