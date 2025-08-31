@@ -46,12 +46,12 @@ logs/
 *.sqlite3
 
 # Repositorios clonados para vectorización
-backend/repositories/
-backend/repositories/*/
-backend/repositories/*_repo/
-backend/repositories/source_repo/
-backend/repositories/frontend_repo/
-backend/repositories/backend_repo/
+repositories/
+repositories/*/
+repositories/*_repo/
+repositories/source_repo/
+repositories/frontend_repo/
+repositories/backend_repo/
 
 # Archivos temporales
 *.tmp
@@ -68,12 +68,3 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
-
-# Node modules (frontend)
-frontend/node_modules/
-frontend/dist/
-frontend/.angular/
-
-# Angular
-frontend/.angular/cache/
-frontend/.angular/workspace/ 

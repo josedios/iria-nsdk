@@ -240,7 +240,7 @@ from .infrastructure.services.llm_service_impl import LLMServiceImpl
 # Instanciar servicios
 vector_store_service = VectorStoreServiceImpl()
 llm_service = LLMServiceImpl()
-unified_vectorization_service = UnifiedVectorizationService(vector_store_service, llm_service, repo_manager)
+unified_vectorization_service = UnifiedVectorizationService(vector_store_service, llm_service, repo_manager, config_repo)
 vectorization_use_case = VectorizationUseCase(unified_vectorization_service)
 
 class VectorizeRepositoryRequest(BaseModel):
