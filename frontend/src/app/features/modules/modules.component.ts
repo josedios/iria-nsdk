@@ -14,7 +14,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatTreeFlatDataSource, MatTreeFlattener, MatTreeModule } from '@angular/material/tree';
-import { ModulesService, NSDKModule, NSDKScreen, RepositoryTreeNode, NSDKAnalysis, AnalysisStatus } from './modules.service';
+import { AnalysisStatus, ModulesService, NSDKAnalysis, NSDKScreen, RepositoryTreeNode } from './modules.service';
 
 interface ModuleNode {
   name: string;
@@ -41,6 +41,8 @@ interface ModuleNode {
   button_count?: number;
   buttons?: string[];
   isLoading?: boolean; // Nuevo campo para indicar si se está cargando el contenido
+  expandable?: boolean; // Campo para indicar si el nodo se puede expandir
+  level?: number; // Nivel de profundidad en el árbol
 }
 
 interface FlatNode {
@@ -123,7 +125,7 @@ export class ModulesComponent implements OnInit {
 
   private _transformer = (node: ModuleNode, level: number): FlatNode => {
     return {
-      expandable: !!node.children && node.children.length > 0,
+      expandable: node.expandable || false,
       name: node.name,
       type: node.type,
       status: node.status,
@@ -267,15 +269,15 @@ export class ModulesComponent implements OnInit {
         console.log('Response.children.length:', response.children?.length);
         console.log('Response.children[0]:', response.children?.[0]);
         console.log('=== FIN RESPUESTA ===');
-        
+
         // Convertir la respuesta del árbol a ModuleNode[]
         const treeData = this.convertTreeToModuleNodes(response.children || []);
         console.log('TreeData convertido:', treeData);
         console.log('TreeData.length:', treeData.length);
-        
+
         this.dataSource.data = treeData;
         this.isLoading = false;
-        
+
         // Opcionalmente, cargar análisis en segundo plano para estadísticas
         this.loadAnalysisInBackground();
       },
@@ -288,38 +290,60 @@ export class ModulesComponent implements OnInit {
   }
 
   /**
-   * Carga el contenido de un directorio cuando se expande
-   */
+ * Carga el contenido de un directorio cuando se expande
+ */
   loadDirectoryContents(node: FlatNode) {
-    if (!node.is_dir || node.expandable) {
-      return; // Ya está cargado o no es un directorio
+    if (!node.is_dir) {
+      return; // No es un directorio
+    }
+
+    // Verificar si ya tiene hijos cargados de manera más robusta
+    const hasLoadedChildren = this.dataSource.data.some(n =>
+      n.level === node.level + 1 &&
+      n.path.startsWith(node.path + '/') &&
+      n.path.split('/').length === node.path.split('/').length + 1
+    );
+
+    if (hasLoadedChildren) {
+      console.log(`El directorio ${node.name} ya tiene hijos cargados, saltando...`);
+      return; // Ya tiene hijos cargados
     }
 
     // Marcar como cargando
     node.isLoading = true;
-    
-    // Obtener la ruta del directorio
-    const directoryPath = node.path;
-    
-    this.modulesService.getDirectoryContents('nsdk-sources', directoryPath).subscribe({
+
+    // Obtener el ID del directorio (no la ruta)
+    const directoryId = node.id;
+    if (!directoryId) {
+      console.error('No se puede cargar el directorio: falta el ID');
+      node.isLoading = false;
+      return;
+    }
+
+    this.modulesService.getDirectoryContents('nsdk-sources', directoryId).subscribe({
       next: (directoryContents) => {
-        console.log(`Contenido del directorio ${directoryPath} cargado:`, directoryContents);
-        
+        console.log(`Contenido del directorio ${node.name} (ID: ${directoryId}) cargado:`, directoryContents);
+        console.log('Tipo de directoryContents:', typeof directoryContents);
+        console.log('¿Es array?', Array.isArray(directoryContents));
+        console.log('Longitud:', directoryContents?.length);
+
         // Convertir el contenido del directorio a ModuleNode[]
         const children = this.convertTreeToModuleNodes(directoryContents);
-        
+        console.log('Children convertidos:', children);
+        console.log('Longitud de children:', children?.length);
+
         // Encontrar el nodo en el árbol y actualizar sus hijos
         this.updateNodeChildren(node, children);
-        
+
         // Actualizar el dataSource
         this.dataSource.data = [...this.dataSource.data];
-        
+
         node.isLoading = false;
       },
       error: (error) => {
-        console.error(`Error cargando contenido del directorio ${directoryPath}:`, error);
+        console.error(`Error cargando contenido del directorio ${node.name} (ID: ${directoryId}):`, error);
         node.isLoading = false;
-        
+
         // Mostrar error en el nodo
         this.snackBar.open(`Error al cargar el directorio ${node.name}`, 'Cerrar', { duration: 3000 });
       }
@@ -330,18 +354,28 @@ export class ModulesComponent implements OnInit {
    * Actualiza los hijos de un nodo en el árbol
    */
   private updateNodeChildren(node: FlatNode, children: ModuleNode[]) {
+    console.log('=== updateNodeChildren ===');
+    console.log('Nodo a actualizar:', node);
+    console.log('Children recibidos:', children);
+    console.log('DataSource actual:', this.dataSource.data);
+
     // Encontrar el índice del nodo en el dataSource
     const nodeIndex = this.dataSource.data.findIndex(n => n.path === node.path);
-    if (nodeIndex === -1) return;
-    
+    console.log('Índice del nodo encontrado:', nodeIndex);
+    if (nodeIndex === -1) {
+      console.error('No se encontró el nodo en el dataSource');
+      return;
+    }
+
     // Convertir los hijos a FlatNode[]
     const flatChildren: FlatNode[] = children.map((child, index) => ({
-      expandable: !!(child.children && child.children.length > 0),
+      expandable: child.expandable || false,
       name: child.name,
       type: child.type,
       status: child.status,
       level: node.level + 1,
       path: child.path,
+      id: child.id, // Importante: incluir el ID para que se puedan expandir
       is_file: child.is_file,
       is_dir: child.is_dir,
       file_count: child.file_count,
@@ -358,16 +392,28 @@ export class ModulesComponent implements OnInit {
       buttons: child.buttons || [],
       isLoading: false
     }));
-    
+
     // Insertar los hijos después del nodo actual
     const newData = [...this.dataSource.data];
+    console.log('Data antes de insertar:', newData.length, 'elementos');
     newData.splice(nodeIndex + 1, 0, ...flatChildren);
-    
+    console.log('Data después de insertar:', newData.length, 'elementos');
+
     // Actualizar el dataSource
     this.dataSource.data = newData;
-    
-    // Marcar el nodo como expandible
-    node.expandable = true;
+    console.log('DataSource actualizado. Nuevo tamaño:', this.dataSource.data.length);
+
+    // Marcar el nodo como expandible si tiene hijos
+    node.expandable = children.length > 0;
+
+    // También marcar los hijos como expandibles si son directorios y tienen subdirectorios
+    flatChildren.forEach(child => {
+      if (child.is_dir && (child.dir_count || 0) > 0) {
+        child.expandable = true;
+      }
+    });
+
+    console.log('Hijos marcados como expandibles:', flatChildren.filter(c => c.expandable).length);
   }
 
   /**
@@ -375,7 +421,7 @@ export class ModulesComponent implements OnInit {
    */
   convertTreeToModuleNodes(treeNode: RepositoryTreeNode | RepositoryTreeNode[]): ModuleNode[] {
     const result: ModuleNode[] = [];
-    
+
     // Si es un array, procesar cada elemento
     if (Array.isArray(treeNode)) {
       for (const child of treeNode) {
@@ -399,13 +445,16 @@ export class ModulesComponent implements OnInit {
           button_count: child.button_count,
           buttons: child.buttons || [],
           status: 'analyzed',
-          children: []
+          children: [],
+          // Marcar como expandible si es un directorio y tiene subdirectorios
+          expandable: child.is_dir && (child.dir_count || 0) > 0,
+          level: 0 // Nivel raíz (se ajustará en updateNodeChildren)
         };
-        
+
         result.push(moduleNode);
       }
     }
-    
+
     return result;
   }
 
@@ -436,7 +485,7 @@ export class ModulesComponent implements OnInit {
       next: (response) => {
         console.log('Análisis sincronizado:', response);
         this.isLoadingAnalysis = false;
-        
+
         // Recargar la raíz después de la sincronización
         this.loadRepositoryRoot();
       },
@@ -461,13 +510,13 @@ export class ModulesComponent implements OnInit {
       next: (status) => {
         this.analysisStatus = status;
         console.log('Estado del análisis:', status);
-        
+
         // Cargar todos los análisis
         this.modulesService.getRepositoryAnalysis('nsdk-sources').subscribe({
           next: (response) => {
             this.nsdkAnalyses = response.analyses;
             console.log('Análisis cargados desde BD:', response);
-            
+
             // Convertir a estructura de árbol para el componente
             const treeData = this.convertAnalysesToTreeNodes(response.analyses);
             this.dataSource.data = treeData;
@@ -493,20 +542,20 @@ export class ModulesComponent implements OnInit {
    */
   convertAnalysesToTreeNodes(analyses: NSDKAnalysis[]): ModuleNode[] {
     const treeData: ModuleNode[] = [];
-    
+
     // Agrupar por directorio
     const filesByDirectory = new Map<string, NSDKAnalysis[]>();
-    
+
     for (const analysis of analyses) {
       const pathParts = analysis.file_path.split('/');
       const directory = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : '.';
-      
+
       if (!filesByDirectory.has(directory)) {
         filesByDirectory.set(directory, []);
       }
       filesByDirectory.get(directory)!.push(analysis);
     }
-    
+
     // Crear nodos de directorio
     for (const [directory, files] of filesByDirectory) {
       if (directory === '.') {
@@ -527,17 +576,17 @@ export class ModulesComponent implements OnInit {
           dir_count: 0,
           children: []
         };
-        
+
         // Agregar archivos como hijos
         for (const file of files) {
           const fileNode = this.convertAnalysisToModuleNode(file);
           dirNode.children!.push(fileNode);
         }
-        
+
         treeData.push(dirNode);
       }
     }
-    
+
     return treeData;
   }
 
@@ -669,10 +718,10 @@ export class ModulesComponent implements OnInit {
     if (!this.analysisStatus) {
       return 'Cargando estadísticas...';
     }
-    
+
     const db = this.analysisStatus.database_stats;
     const disk = this.analysisStatus.disk_stats;
-    
+
     return `${db.total_files} archivos analizados (${db.analysis_progress.toFixed(1)}% completado) | ${disk.total_files_on_disk} archivos en disco | Estado: ${this.analysisStatus.sync_status === 'in_sync' ? 'Sincronizado' : 'Desincronizado'}`;
   }
 
@@ -721,7 +770,7 @@ export class ModulesComponent implements OnInit {
    */
   buildDirectoryTree() {
     console.log('Construyendo estructura de directorios...');
-    
+
     this.modulesService.buildRepositoryTree('nsdk-sources').subscribe({
       next: (response) => {
         console.log('Estructura de directorios construida:', response);
@@ -730,7 +779,7 @@ export class ModulesComponent implements OnInit {
           'Cerrar',
           { duration: 5000 }
         );
-        
+
         // Recargar módulos después de construir la estructura
         setTimeout(() => {
           this.loadModulesFromBackend();
