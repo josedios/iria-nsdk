@@ -408,27 +408,58 @@ export class KnowledgeComponent implements OnInit {
 
   private vectorizeSingleRepository(repoConfig: any, repoName: string, repoType: string): Promise<any> {
     return new Promise((resolve, reject) => {
-      const vectorizeRequest: VectorizeRepositoryRequest = {
-        repo_url: repoConfig.url,
-        branch: repoConfig.branch,
-        username: repoConfig.username,
-        token: repoConfig.token
-      };
-
-      this.knowledgeService.vectorizeRepository(vectorizeRequest).subscribe({
-        next: (response) => {
-          console.log(`Vectorización iniciada para ${repoName}:`, response);
-
-          // Monitorear progreso específico de este repositorio
-          if (response.batch_id) {
-            this.monitorRepositoryProgress(response.batch_id, repoName, repoType, resolve, reject);
-          } else {
-            resolve(response);
+      // Obtener la configuración activa para obtener el config_id
+      this.configService.getAll().subscribe({
+        next: (configurations: Configuration[]) => {
+          if (configurations.length === 0) {
+            reject(new Error('No hay configuraciones disponibles'));
+            return;
           }
+
+          const activeConfig = configurations[0];
+
+          // Mapear el tipo de repositorio al tipo esperado por el backend
+          let backendRepoType: string;
+          switch (repoType) {
+            case 'nsdk_source':
+              backendRepoType = 'source';
+              break;
+            case 'frontend_code':
+              backendRepoType = 'frontend';
+              break;
+            case 'backend_code':
+              backendRepoType = 'backend';
+              break;
+            default:
+              backendRepoType = 'source';
+          }
+
+          const vectorizeRequest: VectorizeRepositoryRequest = {
+            config_id: activeConfig.id!,
+            repo_type: backendRepoType,
+            branch: repoConfig.branch
+          };
+
+          this.knowledgeService.vectorizeRepository(vectorizeRequest).subscribe({
+            next: (response) => {
+              console.log(`Vectorización iniciada para ${repoName}:`, response);
+
+              // Monitorear progreso específico de este repositorio
+              if (response.batch_id) {
+                this.monitorRepositoryProgress(response.batch_id, repoName, repoType, resolve, reject);
+              } else {
+                resolve(response);
+              }
+            },
+            error: (error) => {
+              console.error(`Error vectorizando ${repoName}:`, error);
+              reject(error);
+            }
+          });
         },
         error: (error) => {
-          console.error(`Error vectorizando ${repoName}:`, error);
-          reject(error);
+          console.error('Error obteniendo configuraciones:', error);
+          reject(new Error('Error obteniendo configuración'));
         }
       });
     });

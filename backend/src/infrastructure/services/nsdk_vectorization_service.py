@@ -7,6 +7,7 @@ from pathlib import Path
 import logging
 from git import Repo, GitCommandError
 from abc import ABC, abstractmethod
+from uuid import UUID
 
 from ...domain.entities.nsdk_file import NSDKFile, NSDKFileType, NSDKFileStatus
 from ...domain.entities.vectorization_batch import VectorizationBatch, VectorizationBatchStatus, VectorizationBatchType
@@ -673,46 +674,203 @@ class UnifiedVectorizationService:
         # Detector de tecnología
         self.technology_detector = RepositoryTechnologyDetector()
     
-    async def vectorize_repository(self, repo_url: str, branch: str = 'main', 
-                           username: Optional[str] = None, token: Optional[str] = None,
-                           force_update: bool = True) -> VectorizationBatch:
+    async def vectorize_repository(self, config_id: UUID, repo_type: str, 
+                                  branch: str = 'main', force_update: bool = True) -> VectorizationBatch:
         """
         Vectoriza un repositorio detectando automáticamente su tecnología
         
         Args:
-            repo_url: URL del repositorio
-            branch: Rama a procesar
-            username: Usuario para autenticación
-            token: Token para autenticación
+            config_id: ID de la configuración
+            repo_type: Tipo de repositorio ('source', 'frontend', 'backend')
+            branch: Rama del repositorio
             force_update: Si es True, fuerza pull del repositorio y limpia vectorización existente
             
         Returns:
-            VectorizationBatch: Lote de vectorización creado
+            VectorizationBatch: Lote de vectorización procesado
+        """
+        logger.info(f"=== INICIANDO VECTORIZACIÓN DE REPOSITORIO ===")
+        logger.info(f"Config ID: {config_id}")
+        logger.info(f"Repo Type: {repo_type}")
+        logger.info(f"Branch: {branch}")
+        logger.info(f"Force Update: {force_update}")
+        
+        try:
+            # Crear lote de vectorización
+            logger.info("1. Creando lote de vectorización...")
+            batch = VectorizationBatch(
+                name=f"Vectorización de {repo_type}",
+                batch_type=VectorizationBatchType.REPOSITORY,
+                config_id=config_id,
+                repo_type=repo_type,
+                source_repo_branch=branch
+            )
+            logger.info(f"[OK] Lote creado con ID: {batch.id}")
+            logger.info(f"[OK] Lote config_id: {batch.config_id}")
+            logger.info(f"[OK] Lote repo_type: {batch.repo_type}")
+            
+            # Verificar estado del lote antes de procesar
+            logger.info(f"Estado del lote antes de procesar: {batch.status}")
+            logger.info(f"Total archivos del lote: {batch.total_files}")
+            
+            # Obtener configuración de la base de datos
+            # TODO: Implementar acceso al repositorio de configuraciones
+            # Por ahora, simulamos que obtenemos la configuración
+            logger.info(f"2. Vectorizando repositorio {repo_type} de configuración {config_id}")
+            
+            # Si force_update es True, limpiar vectorización existente de esta configuración ANTES de almacenar el batch
+            if force_update:
+                logger.info("3. Force update activado, limpiando vectorización existente ANTES de almacenar el batch...")
+                logger.info(f"Lotes en memoria ANTES de limpiar: {len(self._batches)}")
+                logger.info(f"IDs de lotes en memoria: {list(self._batches.keys())}")
+                
+                await self._clear_existing_vectorization(config_id, repo_type)
+                logger.info("[OK] Vectorización existente limpiada")
+                
+                # Verificar estado después de limpiar
+                logger.info(f"Lotes en memoria DESPUÉS de limpiar: {len(self._batches)}")
+                logger.info(f"IDs de lotes en memoria: {list(self._batches.keys())}")
+            
+            # Almacenar el lote en memoria DESPUÉS de limpiar
+            logger.info("4. Almacenando lote en memoria DESPUÉS de limpiar...")
+            self._batches[batch.id] = batch
+            logger.info(f"[OK] Lote {batch.id} almacenado en memoria DESPUÉS de limpiar")
+            
+            # Verificar que el lote está realmente almacenado
+            stored_batch = self._batches.get(batch.id)
+            if stored_batch:
+                logger.info(f"[OK] Verificación: Lote {batch.id} encontrado en memoria")
+                logger.info(f"[OK] Verificación: Lote config_id: {stored_batch.config_id}")
+                logger.info(f"[OK] Verificación: Lote repo_type: {stored_batch.repo_type}")
+            else:
+                logger.error(f"[ERROR] Lote {batch.id} NO encontrado en memoria después de almacenar")
+                raise Exception(f"Lote {batch.id} no se almacenó correctamente")
+            
+            # TODO: Obtener URL del repositorio desde la configuración
+            # Por ahora, simulamos que tenemos la URL
+            repo_url = f"https://example.com/{repo_type}-repo"
+            repo_name = f"{repo_type}_repo"
+            
+            # Clonar o actualizar repositorio permanentemente (con pull forzado si force_update)
+            logger.info(f"5. Clonando/actualizando repositorio: {repo_url} (branch: {branch}, force_update: {force_update})")
+            repo_path = self.repository_manager.clone_repository(
+                repo_url, repo_name, branch, None, None, force_update
+            )
+            logger.info(f"[OK] Repositorio disponible en: {repo_path}")
+            
+            # Detectar tecnología del repositorio
+            logger.info("6. Detectando tecnología del repositorio...")
+            technology = self.technology_detector.detect_technology(str(repo_path))
+            logger.info(f"[OK] Tecnología detectada: {technology}")
+            
+            # Delegar en el servicio especializado apropiado
+            logger.info("7. Delegando en servicio especializado...")
+            if technology == 'nsdk':
+                logger.info("[OK] Usando servicio NSDK para vectorización")
+                await self.nsdk_service.vectorize_repository(str(repo_path), batch)
+            elif technology == 'angular':
+                logger.info("[OK] Usando servicio Angular para vectorización")
+                await self.angular_service.vectorize_repository(str(repo_path), batch)
+            elif technology == 'spring-boot':
+                logger.info("[OK] Usando servicio Spring Boot para vectorización")
+                await self.spring_service.vectorize_repository(str(repo_path), batch)
+            else:
+                logger.warning(f"⚠️ Tecnología no reconocida: {technology}. Intentando vectorización genérica...")
+                # Intentar vectorización genérica o fallar
+                batch.fail_processing(f"Tecnología no reconocida: {technology}")
+            
+            # El lote ya está almacenado, solo actualizar el estado final
+            logger.info(f"[OK] Lote {batch.id} procesado completamente")
+            logger.info(f"Estado final del lote: {batch.status}")
+            logger.info(f"Total archivos procesados: {batch.total_files}")
+            
+            # Verificación final
+            final_stored_batch = self._batches.get(batch.id)
+            if final_stored_batch:
+                logger.info(f"[OK] Verificación final: Lote {batch.id} disponible para el frontend")
+            else:
+                logger.error(f"[ERROR] Lote {batch.id} NO disponible para el frontend")
+            
+            return batch
+            
+        except Exception as e:
+            logger.error(f"❌ ERROR en vectorización del repositorio: {str(e)}")
+            logger.error(f"❌ Traceback completo: {e}")
+            
+            if 'batch' in locals():
+                logger.info(f"[OK] Lote ya creado, marcando como fallido: {batch.id}")
+                batch.fail_processing(str(e))
+                # Almacenar el lote fallido
+                self._batches[batch.id] = batch
+                logger.info(f"[OK] Lote fallido {batch.id} almacenado en memoria")
+                return batch
+            else:
+                logger.info("⚠️ Lote no creado, creando lote fallido...")
+                # Crear lote fallido
+                batch = VectorizationBatch(
+                    name=f"Vectorización fallida de {repo_type}",
+                    batch_type=VectorizationBatchType.REPOSITORY,
+                    config_id=config_id,
+                    repo_type=repo_type,
+                    source_repo_branch=branch
+                )
+                batch.fail_processing(str(e))
+                # Almacenar el lote fallido
+                self._batches[batch.id] = batch
+                logger.info(f"[OK] Lote fallido {batch.id} creado y almacenado en memoria")
+                return batch
+    
+    async def vectorize_module(self, config_id: UUID, repo_type: str, module_path: str, 
+                               branch: str = 'main') -> VectorizationBatch:
+        """
+        Vectoriza un módulo específico de un repositorio
+        
+        Args:
+            config_id: ID de la configuración
+            repo_type: Tipo de repositorio ('source', 'frontend', 'backend')
+            module_path: Ruta del módulo a vectorizar
+            branch: Rama del repositorio
+            
+        Returns:
+            VectorizationBatch: Lote de vectorización del módulo
         """
         try:
             # Crear lote de vectorización
             batch = VectorizationBatch(
-                name=f"Vectorización de {repo_url.split('/')[-1]}",
-                batch_type=VectorizationBatchType.REPOSITORY,
-                source_repo_url=repo_url,
+                name=f"Vectorización del módulo {module_path}",
+                batch_type=VectorizationBatchType.MODULE,
+                config_id=config_id,
+                repo_type=repo_type,
                 source_repo_branch=branch
             )
             
-            # Obtener nombre del repositorio de la URL
-            repo_name = repo_url.split('/')[-1].replace('.git', '')
+            # Obtener configuración de la base de datos
+            # TODO: Implementar acceso al repositorio de configuraciones
+            # Por ahora, simulamos que obtenemos la configuración
+            logger.info(f"Vectorizando módulo {module_path} del repositorio {repo_type} de configuración {config_id}")
             
-            # Si force_update es True, limpiar vectorización existente
-            if force_update:
-                logger.info("Force update activado, limpiando vectorización existente...")
-                await self._clear_existing_vectorization()
-                logger.info("Vectorización existente limpiada")
+            # Almacenar el lote en memoria DESPUÉS de procesar
+            self._batches[batch.id] = batch
+            logger.info(f"Lote de módulo {batch.id} almacenado en memoria DESPUÉS de procesar")
             
-            # Clonar o actualizar repositorio permanentemente (con pull forzado si force_update)
-            logger.info(f"Clonando/actualizando repositorio: {repo_url} (branch: {branch}, force_update: {force_update})")
+            # TODO: Obtener URL del repositorio desde la configuración
+            # Por ahora, simulamos que tenemos la URL
+            repo_url = f"https://example.com/{repo_type}-repo"
+            repo_name = f"{repo_type}_repo"
+            
+            # Clonar o actualizar repositorio
+            logger.info(f"Clonando/actualizando repositorio: {repo_url} (branch: {branch})")
             repo_path = self.repository_manager.clone_repository(
-                repo_url, repo_name, branch, username, token, force_update
+                repo_url, repo_name, branch, None, None, False
             )
             logger.info(f"Repositorio disponible en: {repo_path}")
+            
+            # Verificar que el módulo existe
+            module_full_path = Path(repo_path) / module_path
+            if not module_full_path.exists():
+                error_msg = f"Módulo {module_path} no encontrado en el repositorio"
+                logger.error(error_msg)
+                batch.fail_processing(error_msg)
+                return batch
             
             # Detectar tecnología del repositorio
             technology = self.technology_detector.detect_technology(str(repo_path))
@@ -720,92 +878,22 @@ class UnifiedVectorizationService:
             
             # Delegar en el servicio especializado apropiado
             if technology == 'nsdk':
-                logger.info("Usando servicio NSDK para vectorización")
-                await self.nsdk_service.vectorize_repository(str(repo_path), batch)
+                logger.info("Usando servicio NSDK para vectorización del módulo")
+                await self.nsdk_service.vectorize_module(str(repo_path), module_path, batch)
             elif technology == 'angular':
-                logger.info("Usando servicio Angular para vectorización")
-                await self.angular_service.vectorize_repository(str(repo_path), batch)
+                logger.info("Usando servicio Angular para vectorización del módulo")
+                await self.angular_service.vectorize_module(str(repo_path), module_path, batch)
             elif technology == 'spring-boot':
-                logger.info("Usando servicio Spring Boot para vectorización")
-                await self.spring_service.vectorize_repository(str(repo_path), batch)
+                logger.info("Usando servicio Spring Boot para vectorización del módulo")
+                await self.spring_service.vectorize_module(str(repo_path), module_path, batch)
             else:
                 logger.warning(f"Tecnología no reconocida: {technology}. Intentando vectorización genérica...")
                 # Intentar vectorización genérica o fallar
                 batch.fail_processing(f"Tecnología no reconocida: {technology}")
             
-            # Almacenar el lote en memoria
-            self._batches[batch.id] = batch
-            return batch
+            # El lote ya está almacenado, solo actualizar el estado final
+            logger.info(f"Lote de módulo {batch.id} procesado completamente")
             
-        except Exception as e:
-            logger.error(f"Error en vectorización del repositorio: {str(e)}")
-            if 'batch' in locals():
-                batch.fail_processing(str(e))
-                # Almacenar el lote fallido
-                self._batches[batch.id] = batch
-                return batch
-            else:
-                # Crear lote fallido
-                batch = VectorizationBatch(
-                    name=f"Vectorización fallida de {repo_url.split('/')[-1]}",
-                    batch_type=VectorizationBatchType.REPOSITORY,
-                    source_repo_url=repo_url,
-                    source_repo_branch=branch
-                )
-                batch.fail_processing(str(e))
-                # Almacenar el lote fallido
-                self._batches[batch.id] = batch
-                return batch
-    
-    async def vectorize_module(self, module_path: str, repo_url: str, branch: str = 'main') -> VectorizationBatch:
-        """
-        Vectoriza un módulo específico
-        
-        Args:
-            module_path: Ruta del módulo
-            repo_url: URL del repositorio
-            branch: Rama a procesar
-            
-        Returns:
-            VectorizationBatch: Lote de vectorización
-        """
-        try:
-            # Crear lote de vectorización
-            batch = VectorizationBatch(
-                name=f"Vectorización del módulo {module_path}",
-                batch_type=VectorizationBatchType.MODULE,
-                source_repo_url=repo_url,
-                source_repo_branch=branch
-            )
-            
-            # Obtener nombre del repositorio de la URL
-            repo_name = repo_url.split('/')[-1].replace('.git', '')
-            
-            # Clonar o actualizar repositorio
-            repo_path = self.repository_manager.clone_repository(
-                repo_url, repo_name, branch, None, None, False
-            )
-            
-            # Detectar tecnología del repositorio
-            technology = self.technology_detector.detect_technology(str(repo_path))
-            logger.info(f"Tecnología detectada para módulo: {technology}")
-            
-            # Delegar en el servicio especializado apropiado
-            if technology == 'nsdk':
-                logger.info("Usando servicio NSDK para vectorización del módulo")
-                await self.nsdk_service.vectorize_repository(str(repo_path), batch)
-            elif technology == 'angular':
-                logger.info("Usando servicio Angular para vectorización del módulo")
-                await self.angular_service.vectorize_repository(str(repo_path), batch)
-            elif technology == 'spring-boot':
-                logger.info("Usando servicio Spring Boot para vectorización del módulo")
-                await self.spring_service.vectorize_repository(str(repo_path), batch)
-            else:
-                logger.warning(f"Tecnología no reconocida para módulo: {technology}")
-                batch.fail_processing(f"Tecnología no reconocida: {technology}")
-            
-            # Almacenar el lote en memoria
-            self._batches[batch.id] = batch
             return batch
             
         except Exception as e:
@@ -820,7 +908,8 @@ class UnifiedVectorizationService:
                 batch = VectorizationBatch(
                     name=f"Vectorización fallida del módulo {module_path}",
                     batch_type=VectorizationBatchType.MODULE,
-                    source_repo_url=repo_url,
+                    config_id=config_id,
+                    repo_type=repo_type,
                     source_repo_branch=branch
                 )
                 batch.fail_processing(str(e))
@@ -828,12 +917,28 @@ class UnifiedVectorizationService:
                 self._batches[batch.id] = batch
                 return batch
     
-    async def _clear_existing_vectorization(self):
-        """Limpia la vectorización existente del vector store"""
+    async def _clear_existing_vectorization(self, config_id: UUID = None, repo_type: str = None):
+        """
+        Limpia la vectorización existente
+        
+        Args:
+            config_id: ID de la configuración específica
+            repo_type: Tipo de repositorio ('source', 'frontend', 'backend')
+        """
+        logger.info(f"=== INICIANDO LIMPIEZA DE VECTORIZACIÓN ===")
+        logger.info(f"Config ID: {config_id}")
+        logger.info(f"Repo Type: {repo_type}")
+        logger.info(f"Lotes en memoria ANTES de limpiar: {len(self._batches)}")
+        logger.info(f"IDs de lotes en memoria: {list(self._batches.keys())}")
+        
         try:
-            logger.info("Limpiando vectorización existente...")
+            if config_id and repo_type:
+                logger.info(f"1. Limpiando vectorización de configuración {config_id}, repositorio {repo_type}")
+            else:
+                logger.info("1. Limpiando TODA la vectorización existente...")
             
             # Limpiar vector store
+            logger.info("2. Limpiando vector store...")
             if hasattr(self, 'vector_store_service') and self.vector_store_service:
                 # Obtener configuración del vector store (asumiendo que está disponible)
                 # Por ahora, usar configuración por defecto
@@ -842,22 +947,73 @@ class UnifiedVectorizationService:
                     'collectionName': 'nsdk-embeddings'
                 }
                 
-                success = self.vector_store_service.clear_collection(config)
-                if success:
-                    logger.info("Vector store limpiado exitosamente")
+                if config_id and repo_type:
+                    # TODO: Implementar limpieza selectiva en el vector store
+                    logger.info("⚠️ Limpieza selectiva del vector store no implementada aún")
                 else:
-                    logger.warning("No se pudo limpiar el vector store completamente")
+                    # Limpiar toda la colección
+                    logger.info("Limpiando toda la colección del vector store...")
+                    success = self.vector_store_service.clear_collection(config)
+                    if success:
+                        logger.info("[OK] Vector store completamente limpiado")
+                    else:
+                        logger.warning("[WARNING] No se pudo limpiar el vector store completamente")
+            else:
+                logger.warning("[WARNING] Vector store service no disponible")
             
             # Limpiar lotes en memoria
-            self._batches.clear()
-            logger.info("Lotes en memoria limpiados")
+            logger.info("3. Limpiando lotes en memoria...")
+            if config_id and repo_type:
+                # Limpiar solo los lotes de esta configuración y tipo
+                logger.info(f"Buscando lotes con config_id={config_id} y repo_type={repo_type}")
+                keys_to_remove = []
+                
+                for key, batch in self._batches.items():
+                    logger.info(f"Evaluando lote {key}: config_id={batch.config_id}, repo_type={batch.repo_type}")
+                    if batch.config_id == config_id and batch.repo_type == repo_type:
+                        keys_to_remove.append(key)
+                        logger.info(f"[OK] Lote {key} marcado para eliminación")
+                    else:
+                        logger.info(f"[SKIP] Lote {key} NO marcado para eliminación")
+                
+                logger.info(f"Lotes marcados para eliminación: {keys_to_remove}")
+                
+                for key in keys_to_remove:
+                    logger.info(f"Eliminando lote {key}...")
+                    del self._batches[key]
+                    logger.info(f"[OK] Lote {key} eliminado")
+                
+                logger.info(f"[OK] Lotes de configuración {config_id}, tipo {repo_type} limpiados: {len(keys_to_remove)} lotes eliminados")
+            else:
+                # Limpiar todos los lotes
+                logger.info("Limpiando TODOS los lotes...")
+                self._batches.clear()
+                logger.info("[OK] Todos los lotes en memoria limpiados")
             
-            logger.info("Vectorización existente limpiada completamente")
+            # Verificación final
+            logger.info(f"Lotes en memoria DESPUÉS de limpiar: {len(self._batches)}")
+            logger.info(f"IDs de lotes en memoria: {list(self._batches.keys())}")
+            
+            if config_id and repo_type:
+                logger.info(f"[OK] Vectorización de configuración {config_id}, tipo {repo_type} limpiada")
+            else:
+                logger.info("[OK] Toda la vectorización existente limpiada completamente")
             
         except Exception as e:
-            logger.error(f"Error limpiando vectorización existente: {str(e)}")
+            logger.error(f"❌ Error limpiando vectorización existente: {str(e)}")
             # No fallar la operación principal por errores de limpieza
     
+    async def clear_all_vectorization(self):
+        """Limpia TODA la vectorización existente (para 'vectorizar todos')"""
+        try:
+            logger.info("Limpieza completa de toda la vectorización solicitada...")
+            await self._clear_existing_vectorization()  # Sin config_id ni repo_type = limpiar todo
+            logger.info("Limpieza completa de vectorización finalizada")
+            return True
+        except Exception as e:
+            logger.error(f"Error en limpieza completa: {str(e)}")
+            return False
+
     async def search_similar_code(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Busca código similar usando el vector store"""
         try:
@@ -889,7 +1045,29 @@ class UnifiedVectorizationService:
         Returns:
             Optional[VectorizationBatch]: El lote o None si no existe
         """
-        return self._batches.get(batch_id)
+        logger.info(f"=== BUSCANDO LOTE POR ID ===")
+        logger.info(f"Batch ID solicitado: {batch_id}")
+        logger.info(f"Total lotes en memoria: {len(self._batches)}")
+        logger.info(f"IDs de lotes disponibles: {list(self._batches.keys())}")
+        
+        # Buscar el lote
+                                                                                                                                                                                batch = self._batches.get(batch_id)
+        
+        if batch:
+            logger.info(f"[OK] Lote {batch_id} ENCONTRADO")
+            logger.info(f"[OK] Lote config_id: {batch.config_id}")
+            logger.info(f"[OK] Lote repo_type: {batch.repo_type}")
+            logger.info(f"[OK] Lote status: {batch.status}")
+            logger.info(f"[OK] Lote total_files: {batch.total_files}")
+        else:
+            logger.error(f"[ERROR] Lote {batch_id} NO ENCONTRADO")
+            logger.error(f"[ERROR] Lotes disponibles: {list(self._batches.keys())}")
+            
+            # Verificar si hay algún lote con config_id o repo_type similar
+            for key, available_batch in self._batches.items():
+                logger.info(f"Lote disponible {key}: config_id={available_batch.config_id}, repo_type={available_batch.repo_type}")
+        
+        return batch
     
     def get_vectorization_stats(self) -> Dict[str, Any]:
         """Obtiene estadísticas de vectorización separadas por tipo de repositorio"""
@@ -926,28 +1104,27 @@ class UnifiedVectorizationService:
                 # Primero intentar detectar la tecnología del repositorio actual
                 repo_path = None
                 try:
-                    # Obtener el nombre del repositorio de la URL
-                    repo_name = batch.source_repo_url.split('/')[-1].replace('.git', '')
+                    # Obtener el nombre del repositorio del tipo
+                    repo_name = f"{batch.repo_type}_repo"
                     # Construir la ruta del repositorio clonado
                     repo_path = Path(self.repository_manager.get_repo_path(repo_name))
                 except Exception as e:
-                    logger.warning(f"No se pudo obtener ruta del repositorio {batch.source_repo_url}: {e}")
+                    logger.warning(f"No se pudo obtener ruta del repositorio {batch.repo_type}: {e}")
                 
                 # Detectar tecnología del repositorio
                 technology = 'unknown'
                 if repo_path and repo_path.exists():
                     technology = self.technology_detector.detect_technology(str(repo_path))
-                    logger.info(f"Tecnología detectada para {batch.source_repo_url}: {technology}")
+                    logger.info(f"Tecnología detectada para {batch.repo_type}: {technology}")
                 else:
-                    # Fallback: intentar categorizar por nombre de URL
-                    repo_name = batch.source_repo_url.lower()
-                    if 'nsdk' in repo_name or 'source' in repo_name:
+                    # Fallback: intentar categorizar por tipo de repositorio
+                    if batch.repo_type == 'source':
                         technology = 'nsdk'
-                    elif 'angular' in repo_name or 'frontend' in repo_name:
+                    elif batch.repo_type == 'frontend':
                         technology = 'angular'
-                    elif 'spring' in repo_name or 'backend' in repo_name or 'java' in repo_name:
+                    elif batch.repo_type == 'backend':
                         technology = 'spring-boot'
-                    logger.info(f"Tecnología inferida por URL para {batch.source_repo_url}: {technology}")
+                    logger.info(f"Tecnología inferida por tipo para {batch.repo_type}: {technology}")
                 
                 # Categorizar estadísticas según la tecnología detectada
                 if technology == 'nsdk':
@@ -981,7 +1158,7 @@ class UnifiedVectorizationService:
                     spring_stats['total'] += batch.total_files
                     logger.info(f"Estadísticas Spring Boot actualizadas: {spring_stats}")
                 else:
-                    logger.warning(f"Tecnología no reconocida '{technology}' para {batch.source_repo_url}, no se categorizan estadísticas")
+                    logger.warning(f"Tecnología no reconocida '{technology}' para {batch.repo_type}, no se categorizan estadísticas")
             
             logger.info(f"Estadísticas finales - NSDK: {nsdk_stats}, Angular: {angular_stats}, Spring Boot: {spring_stats}")
             

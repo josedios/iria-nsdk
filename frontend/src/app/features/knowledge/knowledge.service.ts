@@ -4,15 +4,15 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface VectorizeRepositoryRequest {
-    repo_url: string;
+    config_id: string;  // ID de la configuración
+    repo_type: string;  // Tipo de repositorio: 'source', 'frontend', 'backend'
     branch: string;
-    username?: string;
-    token?: string;
 }
 
 export interface VectorizeModuleRequest {
+    config_id: string;  // ID de la configuración
+    repo_type: string;  // Tipo de repositorio: 'source', 'frontend', 'backend'
     module_path: string;
-    repo_url: string;
     branch: string;
 }
 
@@ -25,14 +25,15 @@ export interface VectorizationBatch {
     id: string;
     name: string;
     batch_type: string;
-    source_repo_url: string;
+    config_id: string;
+    repo_type: string;
     source_repo_branch: string;
     status: string;
     total_files: number;
     processed_files: number;
     successful_files: number;
     failed_files: number;
-    progress: number;
+    progress_percentage: number;
     success_rate: number;
     started_at?: string;
     completed_at?: string;

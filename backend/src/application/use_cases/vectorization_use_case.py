@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 import logging
+from uuid import UUID
 from ...domain.entities.vectorization_batch import VectorizationBatch
 from ...infrastructure.services.nsdk_vectorization_service import UnifiedVectorizationService
 
@@ -11,31 +12,28 @@ class VectorizationUseCase:
     def __init__(self, unified_vectorization_service: UnifiedVectorizationService):
         self.unified_vectorization_service = unified_vectorization_service
     
-    async def vectorize_repository(self, repo_url: str, branch: str = 'main',
-                           username: Optional[str] = None, token: Optional[str] = None,
+    async def vectorize_repository(self, config_id: str, repo_type: str, branch: str = 'main',
                            force_update: bool = True) -> VectorizationBatch:
         """
-        Vectoriza un repositorio completo de NSDK con pull forzado y limpieza previa
+        Vectoriza un repositorio completo detectando automáticamente su tecnología
         
         Args:
-            repo_url: URL del repositorio
+            config_id: ID de la configuración
+            repo_type: Tipo de repositorio ('source', 'frontend', 'backend')
             branch: Rama a procesar
-            username: Usuario para autenticación
-            token: Token para autenticación
             force_update: Si es True, fuerza pull del repositorio y limpia vectorización existente
             
         Returns:
             VectorizationBatch: Lote de vectorización
         """
         try:
-            logger.info(f"Iniciando vectorización del repositorio: {repo_url} (force_update: {force_update})")
+            logger.info(f"Iniciando vectorización del repositorio: {repo_type} de configuración {config_id} (force_update: {force_update})")
             
             # Ejecutar vectorización con pull forzado y limpieza
             batch = await self.unified_vectorization_service.vectorize_repository(
-                repo_url=repo_url,
+                config_id=config_id,
+                repo_type=repo_type,
                 branch=branch,
-                username=username,
-                token=token,
                 force_update=force_update
             )
             
@@ -46,20 +44,22 @@ class VectorizationUseCase:
             logger.error(f"Error en caso de uso de vectorización: {str(e)}")
             # Crear lote fallido
             batch = VectorizationBatch(
-                name=f"Vectorización fallida de {repo_url.split('/')[-1]}",
-                source_repo_url=repo_url,
+                name=f"Vectorización fallida de {repo_type}",
+                config_id=UUID(config_id),
+                repo_type=repo_type,
                 source_repo_branch=branch
             )
             batch.fail_processing(str(e))
             return batch
     
-    async def vectorize_module(self, module_path: str, repo_url: str, branch: str = 'main') -> VectorizationBatch:
+    async def vectorize_module(self, config_id: str, repo_type: str, module_path: str, branch: str = 'main') -> VectorizationBatch:
         """
         Vectoriza un módulo específico
         
         Args:
+            config_id: ID de la configuración
+            repo_type: Tipo de repositorio ('source', 'frontend', 'backend')
             module_path: Ruta del módulo
-            repo_url: URL del repositorio
             branch: Rama a procesar
             
         Returns:
@@ -70,8 +70,9 @@ class VectorizationUseCase:
             
             # Ejecutar vectorización del módulo
             batch = await self.unified_vectorization_service.vectorize_module(
+                config_id=config_id,
+                repo_type=repo_type,
                 module_path=module_path,
-                repo_url=repo_url,
                 branch=branch
             )
             
@@ -83,7 +84,8 @@ class VectorizationUseCase:
             # Crear lote fallido
             batch = VectorizationBatch(
                 name=f"Vectorización fallida del módulo {module_path}",
-                source_repo_url=repo_url,
+                config_id=UUID(config_id),
+                repo_type=repo_type,
                 source_repo_branch=branch
             )
             batch.fail_processing(str(e))
@@ -165,7 +167,8 @@ class VectorizationUseCase:
                     'id': batch.id,
                     'name': batch.name,
                     'batch_type': batch.batch_type.value,
-                    'source_repo_url': batch.source_repo_url,
+                    'config_id': str(batch.config_id),
+                    'repo_type': batch.repo_type,
                     'source_repo_branch': batch.source_repo_branch,
                     'status': batch.status.value,
                     'total_files': batch.total_files,

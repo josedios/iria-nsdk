@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 from datetime import datetime
 import uuid
+from uuid import UUID
 
 class VectorizationBatchStatus(Enum):
     PENDING = "pending"
@@ -21,7 +22,8 @@ class VectorizationBatchType(Enum):
 class VectorizationBatch:
     name: str
     batch_type: VectorizationBatchType
-    source_repo_url: str
+    config_id: UUID                    # ID de la configuración
+    repo_type: str                     # Tipo de repositorio: 'source', 'frontend', 'backend'
     source_repo_branch: str
     id: Optional[str] = None
     status: VectorizationBatchStatus = VectorizationBatchStatus.PENDING

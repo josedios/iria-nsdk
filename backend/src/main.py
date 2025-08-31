@@ -53,16 +53,16 @@ async def test_database():
         
         # Probar conexión básica
         db = next(get_db())
-        logger.info("✅ Conexión a BD establecida")
+        logger.info("[OK] Conexión a BD establecida")
         
         # Probar consulta simple
         result = db.execute(text("SELECT 1 as test"))
         test_value = result.scalar()
-        logger.info(f"✅ Consulta de prueba exitosa: {test_value}")
+        logger.info(f"[OK] Consulta de prueba exitosa: {test_value}")
         
         # Probar tabla de configuraciones
         configs = db.query(Configuration).all()
-        logger.info(f"✅ Tabla de configuraciones accesible: {len(configs)} configuraciones encontradas")
+        logger.info(f"[OK] Tabla de configuraciones accesible: {len(configs)} configuraciones encontradas")
         
         db.close()
         return {
@@ -73,7 +73,7 @@ async def test_database():
         }
         
     except Exception as e:
-        logger.error(f"❌ Error en conexión a BD: {e}")
+        logger.error(f"[ERROR] Error en conexión a BD: {e}")
         return {
             "message": f"Error en conexión a base de datos: {str(e)}",
             "status": "error",
@@ -244,14 +244,14 @@ unified_vectorization_service = UnifiedVectorizationService(vector_store_service
 vectorization_use_case = VectorizationUseCase(unified_vectorization_service)
 
 class VectorizeRepositoryRequest(BaseModel):
-    repo_url: str
+    config_id: str  # ID de la configuración
+    repo_type: str  # Tipo de repositorio: 'source', 'frontend', 'backend'
     branch: str = 'main'
-    username: Optional[str] = None
-    token: Optional[str] = None
 
 class VectorizeModuleRequest(BaseModel):
+    config_id: str  # ID de la configuración
+    repo_type: str  # Tipo de repositorio: 'source', 'frontend', 'backend'
     module_path: str
-    repo_url: str
     branch: str = 'main'
 
 class SearchCodeRequest(BaseModel):
@@ -260,25 +260,24 @@ class SearchCodeRequest(BaseModel):
 
 @app.post("/vectorize/repository", tags=["Vectorización"])
 async def vectorize_repository(request: VectorizeRepositoryRequest):
-    """Vectorizar un repositorio completo de NSDK"""
+    """Vectorizar un repositorio completo detectando automáticamente su tecnología"""
     print("=== INICIANDO VECTORIZACIÓN DE REPOSITORIO ===")
-    print(f"URL: {request.repo_url}")
+    print(f"Config ID: {request.config_id}")
+    print(f"Repo Type: {request.repo_type}")
     print(f"Branch: {request.branch}")
-    print(f"Username: {request.username}")
     
     logger.info(f"=== INICIANDO VECTORIZACIÓN DE REPOSITORIO ===")
-    logger.info(f"URL: {request.repo_url}")
+    logger.info(f"Config ID: {request.config_id}")
+    logger.info(f"Repo Type: {request.repo_type}")
     logger.info(f"Branch: {request.branch}")
-    logger.info(f"Username: {request.username}")
     
     try:
         print("Llamando a vectorization_use_case.vectorize_repository...")
         logger.info("Llamando a vectorization_use_case.vectorize_repository...")
         batch = await vectorization_use_case.vectorize_repository(
-            repo_url=request.repo_url,
-            branch=request.branch,
-            username=request.username,
-            token=request.token
+            config_id=request.config_id,
+            repo_type=request.repo_type,
+            branch=request.branch
         )
         print(f"Vectorización iniciada exitosamente. Batch ID: {batch.id}")
         logger.info(f"Vectorización iniciada exitosamente. Batch ID: {batch.id}")
@@ -293,13 +292,65 @@ async def vectorize_repository(request: VectorizeRepositoryRequest):
         logger.error(f"Error en vectorización: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en vectorización: {str(e)}")
 
+@app.post("/vectorize/all", tags=["Vectorización"])
+async def vectorize_all_repositories(request: VectorizeRepositoryRequest):
+    """Vectorizar todos los repositorios de una configuración"""
+    print("=== INICIANDO VECTORIZACIÓN DE TODOS LOS REPOSITORIOS ===")
+    print(f"Config ID: {request.config_id}")
+    print(f"Branch: {request.branch}")
+    
+    logger.info(f"=== INICIANDO VECTORIZACIÓN DE TODOS LOS REPOSITORIOS ===")
+    logger.info(f"Config ID: {request.config_id}")
+    logger.info(f"Branch: {request.branch}")
+    
+    try:
+        # Primero limpiar TODA la vectorización existente
+        await unified_vectorization_service.clear_all_vectorization()
+        
+        # Vectorizar cada tipo de repositorio
+        batches = []
+        repo_types = ['source', 'frontend', 'backend']
+        
+        for repo_type in repo_types:
+            try:
+                batch = await vectorization_use_case.vectorize_repository(
+                    config_id=request.config_id,
+                    repo_type=repo_type,
+                    branch=request.branch
+                )
+                batches.append({
+                    "repo_type": repo_type,
+                    "batch_id": batch.id,
+                    "status": "started"
+                })
+                logger.info(f"Vectorización iniciada para {repo_type}: {batch.id}")
+            except Exception as e:
+                logger.error(f"Error vectorizando {repo_type}: {str(e)}")
+                batches.append({
+                    "repo_type": repo_type,
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        return {
+            "status": "started",
+            "message": "Vectorización de todos los repositorios iniciada",
+            "batches": batches
+        }
+        
+    except Exception as e:
+        print(f"Error en vectorización de todos los repositorios: {str(e)}")
+        logger.error(f"Error en vectorización de todos los repositorios: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en vectorización de todos los repositorios: {str(e)}")
+
 @app.post("/vectorize/module", tags=["Vectorización"])
 async def vectorize_module(request: VectorizeModuleRequest):
     """Vectorizar un módulo específico"""
     try:
         batch = await vectorization_use_case.vectorize_module(
+            config_id=request.config_id,
+            repo_type=request.repo_type,
             module_path=request.module_path,
-            repo_url=request.repo_url,
             branch=request.branch
         )
         return {
@@ -309,6 +360,7 @@ async def vectorize_module(request: VectorizeModuleRequest):
             "total_files": batch.total_files
         }
     except Exception as e:
+        logger.error(f"Error en vectorización del módulo: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error en vectorización del módulo: {str(e)}")
 
 @app.get("/vectorize/stats", tags=["Vectorización"])
