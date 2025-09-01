@@ -265,15 +265,38 @@ class VectorStoreServiceImpl:
                               ids: List[str] = None) -> bool:
         """Añade embeddings a FAISS"""
         try:
+            logger.info(f"Añadiendo {len(embeddings)} embeddings a FAISS")
+            logger.info(f"FAISS index inicializado: {self.faiss_index is not None}")
+            
             if not self.faiss_index:
                 logger.error("Índice FAISS no inicializado")
                 return False
             
             # Convertir embeddings a numpy array
-            embeddings_array = np.array(embeddings, dtype=np.float32)
+            logger.info(f"Convirtiendo {len(embeddings)} embeddings a numpy array")
+            logger.info(f"Primer embedding: {embeddings[0][:5]}... (longitud: {len(embeddings[0])})")
+            
+            # Asegurar que todos los embeddings tengan la misma longitud
+            embedding_length = len(embeddings[0])
+            normalized_embeddings = []
+            for emb in embeddings:
+                if len(emb) != embedding_length:
+                    logger.warning(f"Embedding con longitud incorrecta: {len(emb)} vs {embedding_length}")
+                    # Rellenar o truncar si es necesario
+                    if len(emb) < embedding_length:
+                        emb = emb + [0.0] * (embedding_length - len(emb))
+                    else:
+                        emb = emb[:embedding_length]
+                normalized_embeddings.append(emb)
+            
+            embeddings_array = np.array(normalized_embeddings, dtype=np.float32)
+            logger.info(f"Shape del array: {embeddings_array.shape}")
+            logger.info(f"Tipo de datos: {embeddings_array.dtype}")
             
             # Añadir al índice FAISS
+            logger.info("Añadiendo embeddings al índice FAISS...")
             self.faiss_index.add(embeddings_array)
+            logger.info("Embeddings añadidos exitosamente al índice FAISS")
             
             # Añadir metadatos
             if not ids:
@@ -289,6 +312,8 @@ class VectorStoreServiceImpl:
             
         except Exception as e:
             logger.error(f"Error añadiendo embeddings a FAISS: {str(e)}")
+            import traceback
+            logger.error(f"Traceback completo: {traceback.format_exc()}")
             return False
     
     def search_similar(self, query_embedding: List[float], config: dict, 
@@ -390,6 +415,10 @@ class VectorStoreServiceImpl:
                               query_embedding: List[float], limit: int, threshold: float) -> List[Dict[str, Any]]:
         """Busca similares en FAISS"""
         try:
+            logger.info(f"Buscando en FAISS - Query embedding length: {len(query_embedding)}")
+            logger.info(f"FAISS index inicializado: {self.faiss_index is not None}")
+            logger.info(f"FAISS metadata count: {len(self.faiss_metadata) if self.faiss_metadata else 0}")
+            
             if not self.faiss_index or not self.faiss_metadata:
                 logger.error("Índice FAISS no inicializado o sin datos")
                 return []
@@ -398,19 +427,28 @@ class VectorStoreServiceImpl:
             query_array = np.array([query_embedding], dtype=np.float32)
             
             # Buscar en FAISS
+            logger.info(f"Ejecutando búsqueda FAISS con limit={limit}, threshold={threshold}")
             scores, indices = self.faiss_index.search(query_array, limit)
+            logger.info(f"FAISS search results - scores: {scores[0][:5]}, indices: {indices[0][:5]}")
             
             results = []
             for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
+                logger.info(f"Resultado {i}: score={score}, idx={idx}, threshold={threshold}")
                 if score >= threshold and idx < len(self.faiss_metadata):
                     metadata = self.faiss_metadata[idx].copy()
                     metadata['score'] = float(score)
                     results.append(metadata)
+                    logger.info(f"Añadido resultado: {metadata.get('file_name', 'unknown')}")
+                else:
+                    logger.info(f"Resultado descartado: score={score} < threshold={threshold} o idx={idx} >= {len(self.faiss_metadata)}")
             
+            logger.info(f"Total resultados finales: {len(results)}")
             return results
             
         except Exception as e:
             logger.error(f"Error en búsqueda FAISS: {str(e)}")
+            import traceback
+            logger.error(f"Traceback completo: {traceback.format_exc()}")
             return []
     
     def get_collection_stats(self, config: dict, collection_name: str = None) -> Dict[str, Any]:

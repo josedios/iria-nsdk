@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import Column, String, Text, JSON, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 
-from ...database import Base
+from ...database_base import Base
 
 class LLMProvider(Enum):
     OPENAI = "openai"

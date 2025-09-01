@@ -134,6 +134,11 @@ def get_ai_analysis_repository():
     from .infrastructure.repositories.ai_analysis_repository import AIAnalysisRepository
     return AIAnalysisRepository(db)
 
+# Instancia del repositorio de embeddings vectorizados
+def get_vector_embedding_repository(db: Session = Depends(get_db)):
+    from .infrastructure.repositories.vector_embedding_repository import VectorEmbeddingRepository
+    return VectorEmbeddingRepository(db)
+
 # Instancia del servicio de sincronización de análisis
 def get_analysis_sync_service():
     db = next(get_db())
@@ -895,13 +900,20 @@ def get_ai_analysis_result(
 ):
     """Obtiene el resultado del análisis IA más reciente para un fichero"""
     try:
+        logger.info(f"Buscando análisis IA para file_id: {file_id}")
         ai_result = ai_analysis_repo.get_by_file_analysis_id(file_id)
+        
         if not ai_result:
+            logger.warning(f"No se encontró análisis IA para file_id: {file_id}")
             raise HTTPException(status_code=404, detail="No se encontró análisis IA para este fichero")
+        
+        logger.info(f"Análisis IA encontrado: {ai_result.id} para file_id: {file_id}")
+        analysis_dict = ai_result.to_dict()
+        logger.info(f"Análisis convertido a dict: {list(analysis_dict.keys())}")
         
         return {
             "file_id": file_id,
-            "analysis": ai_result.to_dict()
+            "analysis": analysis_dict
         }
         
     except HTTPException:
@@ -920,4 +932,217 @@ def get_ai_analysis_statistics(
         return stats
     except Exception as e:
         logger.error(f"Error obteniendo estadísticas de análisis IA: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}")
+
+@app.get("/ai-analysis/debug", tags=["Análisis IA"])
+def debug_ai_analysis(
+    ai_analysis_repo = Depends(get_ai_analysis_repository)
+):
+    """Endpoint de debug para verificar análisis IA en BD"""
+    try:
+        # Obtener todos los análisis
+        all_analyses = ai_analysis_repo.get_all()
+        
+        debug_info = {
+            "total_analyses": len(all_analyses),
+            "analyses": []
+        }
+        
+        for analysis in all_analyses:
+            debug_info["analyses"].append({
+                "id": analysis.id,
+                "file_analysis_id": analysis.file_analysis_id,
+                "file_type": analysis.file_type,
+                "complexity": analysis.complexity,
+                "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+                "has_frontend": bool(analysis.frontend_analysis),
+                "has_backend": bool(analysis.backend_analysis)
+            })
+        
+        return debug_info
+    except Exception as e:
+        logger.error(f"Error en debug de análisis IA: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en debug: {str(e)}") 
+
+@app.get("/vectorize/embeddings/stats", tags=["Vectorización"])
+def get_embeddings_stats(
+    vector_embedding_repo = Depends(get_vector_embedding_repository)
+):
+    """Obtener estadísticas de embeddings vectorizados"""
+    try:
+        stats = vector_embedding_repo.get_stats()
+        return {
+            "status": "success",
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas de embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}")
+
+@app.delete("/vectorize/embeddings/clear", tags=["Vectorización"])
+def clear_embeddings(
+    config_id: str = None,
+    repo_type: str = None,
+    branch: str = 'main',
+    vector_embedding_repo = Depends(get_vector_embedding_repository)
+):
+    """Limpiar embeddings vectorizados"""
+    try:
+        if config_id and repo_type:
+            # Limpiar embeddings específicos
+            success = vector_embedding_repo.delete_by_config_and_repo(config_id, repo_type, branch)
+            message = f"Embeddings eliminados para config_id: {config_id}, repo_type: {repo_type}, branch: {branch}"
+        elif config_id:
+            # Limpiar todos los embeddings de una configuración
+            success = vector_embedding_repo.delete_by_config(config_id)
+            message = f"Todos los embeddings eliminados para config_id: {config_id}"
+        else:
+            raise HTTPException(status_code=400, detail="Debe especificar al menos config_id")
+        
+        if success:
+            return {
+                "status": "success",
+                "message": message
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Error eliminando embeddings")
+            
+    except Exception as e:
+        logger.error(f"Error limpiando embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error limpiando embeddings: {str(e)}") 
+
+# Función para inicializar embeddings al arrancar
+async def initialize_embeddings_on_startup():
+    """Inicializa embeddings desde BD al Vector Store al arrancar"""
+    try:
+        logger.info("=== INICIALIZANDO EMBEDDINGS AL ARRANCAR ===")
+        
+        from .infrastructure.services.embedding_sync_service import EmbeddingSyncService
+        from .infrastructure.repositories.vector_embedding_repository import VectorEmbeddingRepository
+        from .database import get_db
+        
+        # Obtener repositorio de embeddings
+        db = next(get_db())
+        vector_embedding_repo = VectorEmbeddingRepository(db)
+        
+        # Verificar si hay embeddings en la BD
+        stats = vector_embedding_repo.get_stats()
+        if stats.get('total_embeddings', 0) == 0:
+            logger.info("=== NO HAY EMBEDDINGS EN BD - OMITIENDO INICIALIZACIÓN ===")
+            return
+        
+        # Crear servicio de sincronización
+        sync_service = EmbeddingSyncService(vector_store_service)
+        
+        # Cargar embeddings desde BD
+        success = await sync_service.load_embeddings_from_db(vector_embedding_repo)
+        
+        if success:
+            logger.info("=== EMBEDDINGS INICIALIZADOS EXITOSAMENTE ===")
+        else:
+            logger.warning("=== ADVERTENCIA: No se pudieron inicializar embeddings ===")
+            
+    except Exception as e:
+        logger.error(f"Error inicializando embeddings al arrancar: {str(e)}")
+
+@app.post("/vectorize/embeddings/sync", tags=["Vectorización"])
+async def sync_embeddings_to_vector_store(
+    config_id: str = None,
+    vector_embedding_repo = Depends(get_vector_embedding_repository)
+):
+    """Sincronizar embeddings desde BD al Vector Store"""
+    try:
+        from .infrastructure.services.embedding_sync_service import EmbeddingSyncService
+        
+        sync_service = EmbeddingSyncService(vector_store_service)
+        success = await sync_service.sync_embeddings_to_vector_store(
+            vector_embedding_repo, 
+            config_id=config_id
+        )
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "Embeddings sincronizados al Vector Store exitosamente"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Error sincronizando embeddings")
+            
+    except Exception as e:
+        logger.error(f"Error sincronizando embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error sincronizando embeddings: {str(e)}")
+
+@app.get("/vectorize/vector-store/stats", tags=["Vectorización"])
+def get_vector_store_stats():
+    """Obtener estadísticas del Vector Store"""
+    try:
+        from .infrastructure.services.embedding_sync_service import EmbeddingSyncService
+        
+        sync_service = EmbeddingSyncService(vector_store_service)
+        stats = sync_service.get_vector_store_stats()
+        
+        return {
+            "status": "success",
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas del Vector Store: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}")
+
+# Evento de inicio de la aplicación
+@app.on_event("startup")
+async def startup_event():
+    """Evento que se ejecuta al arrancar la aplicación"""
+    logger.info("=== INICIANDO APLICACIÓN ===")
+    
+    # Inicializar LLM service
+    await initialize_llm_service()
+    
+    # Inicializar embeddings
+    await initialize_embeddings_on_startup()
+    
+    logger.info("=== APLICACIÓN INICIADA EXITOSAMENTE ===") 
+
+@app.post("/test/search", tags=["Test"])
+async def test_semantic_search(
+    query: str,
+    limit: int = 5,
+    threshold: float = 0.5,
+    vector_embedding_repo = Depends(get_vector_embedding_repository)
+):
+    """Endpoint temporal para probar búsquedas semánticas"""
+    try:
+        from .application.use_cases.vectorization_use_case import VectorizationUseCase
+        from .infrastructure.services.llm_service_impl import LLMServiceImpl
+        
+        # Crear LLM service para obtener embedding de la query
+        llm_service = LLMServiceImpl()
+        
+        # Obtener embedding de la query
+        logger.info(f"Obteniendo embedding para query: {query}")
+        query_embedding = await llm_service.get_embedding(query)
+        logger.info(f"Embedding obtenido, longitud: {len(query_embedding)}")
+        
+        # Buscar similares
+        config = {
+            'type': 'faiss',
+            'collectionName': 'nsdk-embeddings'
+        }
+        
+        results = vector_store_service.search_similar(
+            query_embedding=query_embedding,
+            config=config,
+            limit=limit,
+            threshold=threshold
+        )
+        
+        return {
+            "status": "success",
+            "query": query,
+            "results_count": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en búsqueda de prueba: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en búsqueda: {str(e)}") 

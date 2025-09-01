@@ -14,10 +14,11 @@ class AIAnalysisRepository:
     def create(self, analysis_result: AIAnalysisResult) -> AIAnalysisResult:
         """Crea un nuevo resultado de análisis"""
         try:
+            logger.info(f"Guardando análisis IA en BD: file_analysis_id={analysis_result.file_analysis_id}")
             self.db.add(analysis_result)
             self.db.commit()
             self.db.refresh(analysis_result)
-            logger.info(f"Resultado de análisis IA creado: {analysis_result.id}")
+            logger.info(f"Resultado de análisis IA creado exitosamente: {analysis_result.id}")
             return analysis_result
         except Exception as e:
             self.db.rollback()
@@ -37,9 +38,29 @@ class AIAnalysisRepository:
     def get_by_file_analysis_id(self, file_analysis_id: str) -> Optional[AIAnalysisResult]:
         """Obtiene el resultado de análisis más reciente para un fichero"""
         try:
-            return self.db.query(AIAnalysisResult).filter(
+            logger.info(f"Buscando análisis IA en BD para file_analysis_id: {file_analysis_id}")
+            
+            # Primero verificar si hay algún análisis para este file_id
+            count = self.db.query(AIAnalysisResult).filter(
+                AIAnalysisResult.file_analysis_id == file_analysis_id
+            ).count()
+            logger.info(f"Total de análisis encontrados para {file_analysis_id}: {count}")
+            
+            if count == 0:
+                logger.warning(f"No hay análisis en BD para file_analysis_id: {file_analysis_id}")
+                return None
+            
+            # Obtener el más reciente
+            result = self.db.query(AIAnalysisResult).filter(
                 AIAnalysisResult.file_analysis_id == file_analysis_id
             ).order_by(AIAnalysisResult.created_at.desc()).first()
+            
+            if result:
+                logger.info(f"Análisis más reciente encontrado: {result.id} creado en {result.created_at}")
+            else:
+                logger.warning(f"No se pudo obtener el análisis más reciente para {file_analysis_id}")
+            
+            return result
         except Exception as e:
             logger.error(f"Error obteniendo resultado de análisis para fichero {file_analysis_id}: {str(e)}")
             return None
@@ -89,6 +110,14 @@ class AIAnalysisRepository:
             ).order_by(AIAnalysisResult.created_at.desc()).all()
         except Exception as e:
             logger.error(f"Error obteniendo análisis por complejidad {complexity}: {str(e)}")
+            return []
+    
+    def get_all(self) -> List[AIAnalysisResult]:
+        """Obtiene todos los resultados de análisis"""
+        try:
+            return self.db.query(AIAnalysisResult).order_by(AIAnalysisResult.created_at.desc()).all()
+        except Exception as e:
+            logger.error(f"Error obteniendo todos los análisis: {str(e)}")
             return []
     
     def get_statistics(self) -> dict:

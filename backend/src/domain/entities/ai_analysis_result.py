@@ -54,6 +54,28 @@ class AIAnalysisResult(Base):
     
     def to_dict(self) -> dict:
         """Convierte la entidad a diccionario"""
+        import json
+        
+        # Función helper para parsear JSON strings
+        def parse_json_field(field):
+            if isinstance(field, str):
+                try:
+                    return json.loads(field)
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            return field or []
+        
+        # Procesar frontend_analysis para asegurar que dependencies sea un array
+        frontend_analysis = self.frontend_analysis
+        if isinstance(frontend_analysis, dict) and 'dependencies' in frontend_analysis:
+            if isinstance(frontend_analysis['dependencies'], str):
+                try:
+                    frontend_analysis['dependencies'] = json.loads(frontend_analysis['dependencies'])
+                except (json.JSONDecodeError, TypeError):
+                    frontend_analysis['dependencies'] = []
+            elif not isinstance(frontend_analysis['dependencies'], list):
+                frontend_analysis['dependencies'] = []
+        
         return {
             'id': self.id,
             'file_analysis_id': self.file_analysis_id,
@@ -63,10 +85,10 @@ class AIAnalysisResult(Base):
             'file_type': self.file_type,
             'complexity': self.complexity,
             'estimated_hours': self.estimated_hours,
-            'frontend_analysis': self.frontend_analysis,
-            'backend_analysis': self.backend_analysis,
-            'migration_notes': self.migration_notes,
-            'potential_issues': self.potential_issues,
+            'frontend': frontend_analysis,
+            'backend': self.backend_analysis,
+            'migration_notes': parse_json_field(self.migration_notes),
+            'potential_issues': parse_json_field(self.potential_issues),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

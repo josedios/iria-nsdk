@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional, List
 import logging
+import re
 from pathlib import Path
 from ..use_cases.vectorization_use_case import VectorizationUseCase
 from ...infrastructure.services.llm_service_impl import LLMServiceImpl
@@ -310,12 +311,17 @@ Sé preciso en las estimaciones de complejidad y horas.
         """Procesa la respuesta de la IA y la estructura"""
         try:
             import json
+            import re
             
             logger.info(f"Intentando parsear JSON de {len(ai_response)} caracteres")
             logger.info(f"Primeros 200 caracteres: {ai_response[:200]}")
             
+            # Limpiar la respuesta - extraer solo el JSON
+            cleaned_response = self._extract_json_from_response(ai_response)
+            logger.info(f"Respuesta limpiada: {len(cleaned_response)} caracteres")
+            
             # Intentar parsear como JSON
-            analysis_data = json.loads(ai_response)
+            analysis_data = json.loads(cleaned_response)
             logger.info(f"JSON parseado exitosamente. Claves: {list(analysis_data.keys())}")
             
             # Agregar metadatos adicionales
@@ -328,6 +334,20 @@ Sé preciso en las estimaciones de complejidad y horas.
         except json.JSONDecodeError as e:
             logger.error(f"Error parseando respuesta JSON de IA: {str(e)}")
             logger.error(f"Respuesta completa: {ai_response}")
+            
+            # Intentar reparar JSON incompleto
+            try:
+                repaired_json = self._repair_incomplete_json(ai_response)
+                if repaired_json:
+                    analysis_data = json.loads(repaired_json)
+                    analysis_data["file_name"] = file_name
+                    analysis_data["analysis_timestamp"] = self._get_current_timestamp()
+                    analysis_data["analysis_version"] = "1.0"
+                    logger.info("JSON reparado exitosamente")
+                    return analysis_data
+            except Exception as repair_error:
+                logger.error(f"Error reparando JSON: {str(repair_error)}")
+            
             # Crear respuesta de fallback
             return {
                 "file_name": file_name,
@@ -337,6 +357,68 @@ Sé preciso en las estimaciones de complejidad y horas.
                 "analysis_timestamp": self._get_current_timestamp(),
                 "analysis_version": "1.0"
             }
+    
+    def _extract_json_from_response(self, response: str) -> str:
+        """Extrae el JSON de la respuesta de la IA"""
+        # Buscar JSON entre backticks
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', response, re.DOTALL)
+        if json_match:
+            return json_match.group(1)
+        
+        # Buscar JSON sin backticks
+        json_match = re.search(r'(\{.*\})', response, re.DOTALL)
+        if json_match:
+            return json_match.group(1)
+        
+        # Si no encuentra JSON, devolver la respuesta completa
+        return response
+    
+    def _repair_incomplete_json(self, response: str) -> str:
+        """Intenta reparar JSON incompleto"""
+        try:
+            # Extraer el JSON
+            json_str = self._extract_json_from_response(response)
+            
+            # Si el JSON termina abruptamente en un array o objeto, completarlo
+            if json_str.strip().endswith(','):
+                json_str = json_str.rstrip(',')
+            
+            # Buscar el último objeto completo
+            last_complete_brace = json_str.rfind('}')
+            if last_complete_brace > 0:
+                # Verificar si hay arrays abiertos antes del último }
+                before_last_brace = json_str[:last_complete_brace]
+                open_brackets = before_last_brace.count('[')
+                close_brackets = before_last_brace.count(']')
+                
+                # Cerrar arrays abiertos
+                while close_brackets < open_brackets:
+                    json_str = json_str[:last_complete_brace] + ']' + json_str[last_complete_brace:]
+                    close_brackets += 1
+                    last_complete_brace += 1
+            
+            # Contar llaves abiertas y cerradas
+            open_braces = json_str.count('{')
+            close_braces = json_str.count('}')
+            
+            # Cerrar llaves faltantes
+            while close_braces < open_braces:
+                json_str += '}'
+                close_braces += 1
+            
+            # Si hay comas al final, quitarlas
+            json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+            
+            # Verificar que el JSON sea válido
+            import json
+            json.loads(json_str)  # Test parse
+            
+            logger.info(f"JSON reparado exitosamente: {len(json_str)} caracteres")
+            return json_str
+            
+        except Exception as e:
+            logger.error(f"Error reparando JSON: {str(e)}")
+            return None
     
     def _get_current_timestamp(self) -> str:
         """Obtiene timestamp actual en formato ISO"""

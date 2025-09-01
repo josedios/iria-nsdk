@@ -537,7 +537,7 @@ export class ModulesComponent implements OnInit {
       expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
       name: child.name,
       type: child.type,
-      status: child.is_file ? 'pending' : undefined,
+      status: child.is_file && child.id ? this.getAnalysisStatus(child.id) : undefined,
       level: 0,
       path: child.path,
       id: child.id,
@@ -563,9 +563,22 @@ export class ModulesComponent implements OnInit {
   }
 
   /**
+   * Obtiene el estado de análisis de un archivo específico
+   */
+  private getAnalysisStatus(fileId: string): 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error' {
+    // Buscar en los análisis cargados
+    const analysis = this.nsdkAnalyses.find(a => a.id === fileId);
+    if (analysis) {
+      return (analysis.analysis_status as 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error') || 'pending';
+    }
+    return 'pending';
+  }
+
+  /**
  * Carga análisis en segundo plano para estadísticas
  */
   loadAnalysisInBackground() {
+    // Cargar estado general del análisis
     this.modulesService.getRepositoryAnalysisStatus('nsdk-sources').subscribe({
       next: (status: any) => {
         this.analysisStatus = status;
@@ -575,6 +588,41 @@ export class ModulesComponent implements OnInit {
         console.log('No se pudo cargar el estado del análisis en segundo plano:', error);
       }
     });
+
+    // Cargar análisis individuales de archivos
+    this.modulesService.getRepositoryAnalysis('nsdk-sources').subscribe({
+      next: (response: any) => {
+        this.nsdkAnalyses = response.analyses || [];
+        console.log('Análisis individuales cargados:', this.nsdkAnalyses.length);
+
+        // Actualizar el estado de los nodos en el árbol
+        this.updateTreeNodesStatus();
+      },
+      error: (error: any) => {
+        console.log('No se pudieron cargar los análisis individuales:', error);
+      }
+    });
+  }
+
+  /**
+ * Actualiza el estado de los nodos en el árbol basado en los análisis cargados
+ */
+  private updateTreeNodesStatus() {
+    const currentData = this.dataSource.data;
+    const updatedData = currentData.map(node => {
+      if (node.is_file && node.id) {
+        const analysis = this.nsdkAnalyses.find(a => a.id === node.id);
+        if (analysis) {
+          return {
+            ...node,
+            status: (analysis.analysis_status as 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error') || 'pending'
+          };
+        }
+      }
+      return node;
+    });
+
+    this.dataSource.data = updatedData;
   }
 
   /**
@@ -1029,22 +1077,27 @@ export class ModulesComponent implements OnInit {
     const repoName = 'nsdk-sources';
     this.modulesService.analyzeFileWithAI(repoName, node.id).subscribe({
       next: (response: any) => {
-        console.log('Análisis IA iniciado:', response);
-        this.snackBar.open(
-          `Análisis IA iniciado para ${node.name}`,
-          'Cerrar',
-          { duration: 4000 }
-        );
+        console.log('Análisis IA completado:', response);
+        node.status = 'analyzed';
 
-        // Simular progreso del análisis (en producción esto vendría del backend)
-        setTimeout(() => {
-          node.status = 'analyzed';
-          this.snackBar.open(
-            `Análisis completado para ${node.name}`,
-            'Cerrar',
-            { duration: 3000 }
-          );
-        }, 5000);
+        // Actualizar la lista de análisis
+        const existingIndex = this.nsdkAnalyses.findIndex(a => a.id === node.id);
+        if (existingIndex >= 0) {
+          this.nsdkAnalyses[existingIndex].analysis_status = 'analyzed';
+        } else {
+          // Agregar nuevo análisis si no existe
+          this.nsdkAnalyses.push({
+            id: node.id,
+            file_name: node.name,
+            analysis_status: 'analyzed'
+          } as NSDKAnalysis);
+        }
+
+        this.snackBar.open(
+          `Análisis IA completado para ${node.name}`,
+          'Cerrar',
+          { duration: 3000 }
+        );
       },
       error: (error: any) => {
         console.error('Error en análisis IA:', error);
@@ -1070,6 +1123,7 @@ export class ModulesComponent implements OnInit {
     this.modulesService.getAIAnalysisResult(repoName, node.id).subscribe({
       next: (response: any) => {
         console.log('Análisis IA obtenido:', response);
+        console.log('Estructura de response.analysis:', response.analysis);
         this.openAIAnalysisModal(node, response.analysis);
       },
       error: (error: any) => {
@@ -1146,6 +1200,7 @@ export class ModulesComponent implements OnInit {
   }
 
   openAIAnalysisModal(node: FlatNode, aiAnalysis: any) {
+    console.log('Abriendo modal de análisis IA con datos:', { node, aiAnalysis });
     this.dialog.open(AIAnalysisModalComponent, {
       width: '95vw',
       height: '95vh',
@@ -1607,38 +1662,44 @@ export class FileViewerModalComponent {
                 <mat-card-content>
                   <p>{{ data.analysis.analysis_summary || 'No hay resumen disponible' }}</p>
                   
-                  <div class="summary-stats" *ngIf="data.analysis.frontend_analysis">
+                  <div class="summary-stats" *ngIf="data.analysis.frontend">
                     <div class="stat-item">
-                      <strong>Campos:</strong> {{ data.analysis.frontend_analysis.fields?.length || 0 }}
+                      <strong>Campos:</strong> {{ data.analysis.frontend.fields?.length || 0 }}
                     </div>
                     <div class="stat-item">
-                      <strong>Botones:</strong> {{ data.analysis.frontend_analysis.buttons?.length || 0 }}
+                      <strong>Botones:</strong> {{ data.analysis.frontend.buttons?.length || 0 }}
                     </div>
                     <div class="stat-item">
-                      <strong>Endpoints:</strong> {{ data.analysis.backend_analysis?.endpoints?.length || 0 }}
+                      <strong>Tablas:</strong> {{ data.analysis.frontend.tables?.length || 0 }}
+                    </div>
+                    <div class="stat-item">
+                      <strong>Navegaciones:</strong> {{ data.analysis.frontend.navigations?.length || 0 }}
+                    </div>
+                    <div class="stat-item">
+                      <strong>Endpoints:</strong> {{ data.analysis.backend?.endpoints?.length || 0 }}
                     </div>
                   </div>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.migration_notes?.length">
+              <mat-card *ngIf="getMigrationNotes()?.length">
                 <mat-card-header>
                   <mat-card-title>Notas de Migración</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <ul>
-                    <li *ngFor="let note of data.analysis.migration_notes">{{ note }}</li>
+                    <li *ngFor="let note of getMigrationNotes()">{{ note }}</li>
                   </ul>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.potential_issues?.length" class="issues-card">
+              <mat-card *ngIf="getPotentialIssues()?.length" class="issues-card">
                 <mat-card-header>
                   <mat-card-title>⚠️ Problemas Potenciales</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <ul>
-                    <li *ngFor="let issue of data.analysis.potential_issues">{{ issue }}</li>
+                    <li *ngFor="let issue of getPotentialIssues()">{{ issue }}</li>
                   </ul>
                 </mat-card-content>
               </mat-card>
@@ -1647,25 +1708,26 @@ export class FileViewerModalComponent {
           
           <!-- Frontend Tab -->
           <mat-tab label="Frontend (Angular)">
-            <div class="tab-content" *ngIf="data.analysis.frontend_analysis">
+            <div class="tab-content" *ngIf="data.analysis.frontend">
               <mat-card>
                 <mat-card-header>
                   <mat-card-title>Componente Angular</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <div class="component-info">
-                    <p><strong>Tipo:</strong> {{ data.analysis.frontend_analysis.component_type || 'N/A' }}</p>
-                    <p><strong>Ruta:</strong> {{ data.analysis.frontend_analysis.routing || 'N/A' }}</p>
+                    <p><strong>Tipo:</strong> {{ data.analysis.frontend.component_type || 'N/A' }}</p>
+                    <p><strong>Ruta:</strong> {{ data.analysis.frontend.routing || 'N/A' }}</p>
+                    <p><strong>Flujo de Navegación:</strong> {{ data.analysis.frontend.navigation_flow || 'N/A' }}</p>
                   </div>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.frontend_analysis.fields?.length">
+              <mat-card *ngIf="data.analysis.frontend.fields?.length">
                 <mat-card-header>
                   <mat-card-title>Campos del Formulario</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  <div class="field-item" *ngFor="let field of data.analysis.frontend_analysis.fields">
+                  <div class="field-item" *ngFor="let field of data.analysis.frontend.fields">
                     <div class="field-header">
                       <strong>{{ field.name }}</strong>
                       <mat-chip [color]="field.required ? 'primary' : 'default'">
@@ -1678,38 +1740,104 @@ export class FileViewerModalComponent {
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.frontend_analysis.buttons?.length">
+              <mat-card *ngIf="data.analysis.frontend.buttons?.length">
                 <mat-card-header>
                   <mat-card-title>Botones</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  <div class="button-item" *ngFor="let button of data.analysis.frontend_analysis.buttons">
+                  <div class="button-item" *ngFor="let button of data.analysis.frontend.buttons">
                     <mat-chip [color]="getButtonColor(button.action)">{{ button.name }}</mat-chip>
                     <span>{{ button.description || button.action }}</span>
                   </div>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.frontend_analysis.angular_components?.length">
+              <mat-card *ngIf="data.analysis.frontend.tables?.length">
+                <mat-card-header>
+                  <mat-card-title>Tablas</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="table-item" *ngFor="let table of data.analysis.frontend.tables">
+                    <div class="table-header">
+                      <strong>{{ table.name }}</strong>
+                      <span>{{ table.description }}</span>
+                    </div>
+                    <div class="table-columns" *ngIf="table.columns?.length">
+                      <h4>Columnas:</h4>
+                      <div class="column-item" *ngFor="let column of table.columns">
+                        <strong>{{ column.name }}</strong> ({{ column.type }})
+                        <span *ngIf="column.sortable">• Ordenable</span>
+                        <span *ngIf="column.filterable">• Filtrable</span>
+                        <p *ngIf="column.description">{{ column.description }}</p>
+                      </div>
+                    </div>
+                    <div class="table-actions" *ngIf="table.actions?.length">
+                      <h4>Acciones:</h4>
+                      <mat-chip *ngFor="let action of table.actions" color="accent">{{ action }}</mat-chip>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend.navigations?.length">
+                <mat-card-header>
+                  <mat-card-title>Navegaciones</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="navigation-item" *ngFor="let nav of data.analysis.frontend.navigations">
+                    <div class="navigation-header">
+                      <strong>{{ nav.trigger }}</strong> → {{ nav.destination }}
+                    </div>
+                    <p *ngIf="nav.description">{{ nav.description }}</p>
+                    <p *ngIf="nav.condition"><strong>Condición:</strong> {{ nav.condition }}</p>
+                    <div *ngIf="nav.parameters?.length">
+                      <strong>Parámetros:</strong>
+                      <mat-chip *ngFor="let param of nav.parameters" color="primary">{{ param }}</mat-chip>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend.top_menu?.menu_items?.length">
+                <mat-card-header>
+                  <mat-card-title>Menú Superior</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="menu-item" *ngFor="let menuItem of data.analysis.frontend.top_menu.menu_items">
+                    <div class="menu-header">
+                      <strong>{{ menuItem.label }}</strong> ({{ menuItem.action }})
+                    </div>
+                    <p *ngIf="menuItem.destination">→ {{ menuItem.description }}</p>
+                    <div *ngIf="menuItem.submenu?.length">
+                      <h4>Submenús:</h4>
+                      <div class="submenu-item" *ngFor="let submenu of menuItem.submenu">
+                        <strong>{{ submenu.label }}</strong> → {{ submenu.destination }}
+                      </div>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend.angular_components?.length">
                 <mat-card-header>
                   <mat-card-title>Componentes Angular Material</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <div class="components-list">
-                    <mat-chip *ngFor="let component of data.analysis.frontend_analysis.angular_components" color="accent">
+                    <mat-chip *ngFor="let component of data.analysis.frontend.angular_components" color="accent">
                       {{ component }}
                     </mat-chip>
                   </div>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.frontend_analysis.dependencies?.length">
+              <mat-card *ngIf="getDependencies()?.length">
                 <mat-card-header>
                   <mat-card-title>Dependencias NPM</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <div class="dependencies-list">
-                    <code *ngFor="let dep of data.analysis.frontend_analysis.dependencies">{{ dep }}</code>
+                    <code *ngFor="let dep of getDependencies()">{{ dep }}</code>
                   </div>
                 </mat-card-content>
               </mat-card>
@@ -1718,25 +1846,25 @@ export class FileViewerModalComponent {
           
           <!-- Backend Tab -->
           <mat-tab label="Backend (Spring Boot)">
-            <div class="tab-content" *ngIf="data.analysis.backend_analysis">
+            <div class="tab-content" *ngIf="data.analysis.backend">
               <mat-card>
                 <mat-card-header>
                   <mat-card-title>Entidad JPA</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <div class="entity-info">
-                    <p><strong>Nombre:</strong> {{ data.analysis.backend_analysis.entity_name || 'N/A' }}</p>
-                    <p><strong>Tabla BD:</strong> {{ data.analysis.backend_analysis.database_table || 'N/A' }}</p>
+                    <p><strong>Nombre:</strong> {{ data.analysis.backend.entity_name || 'N/A' }}</p>
+                    <p><strong>Tabla BD:</strong> {{ data.analysis.backend.database_table || 'N/A' }}</p>
                   </div>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.backend_analysis.fields?.length">
+              <mat-card *ngIf="data.analysis.backend.fields?.length">
                 <mat-card-header>
                   <mat-card-title>Campos de la Entidad</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  <div class="entity-field" *ngFor="let field of data.analysis.backend_analysis.fields">
+                  <div class="entity-field" *ngFor="let field of data.analysis.backend.fields">
                     <div class="field-header">
                       <strong>{{ field.name }}</strong>
                       <mat-chip color="primary">{{ field.java_type }}</mat-chip>
@@ -1749,12 +1877,12 @@ export class FileViewerModalComponent {
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.backend_analysis.endpoints?.length">
+              <mat-card *ngIf="data.analysis.backend.endpoints?.length">
                 <mat-card-header>
                   <mat-card-title>Endpoints REST</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  <div class="endpoint-item" *ngFor="let endpoint of data.analysis.backend_analysis.endpoints">
+                  <div class="endpoint-item" *ngFor="let endpoint of data.analysis.backend.endpoints">
                     <div class="endpoint-header">
                       <mat-chip [color]="getMethodColor(endpoint.method)">{{ endpoint.method }}</mat-chip>
                       <code>{{ endpoint.path }}</code>
@@ -1764,22 +1892,22 @@ export class FileViewerModalComponent {
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.backend_analysis.business_logic">
+              <mat-card *ngIf="data.analysis.backend.business_logic">
                 <mat-card-header>
                   <mat-card-title>Lógica de Negocio</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  <p>{{ data.analysis.backend_analysis.business_logic }}</p>
+                  <p>{{ data.analysis.backend.business_logic }}</p>
                 </mat-card-content>
               </mat-card>
 
-              <mat-card *ngIf="data.analysis.backend_analysis.spring_annotations?.length">
+              <mat-card *ngIf="data.analysis.backend.spring_annotations?.length">
                 <mat-card-header>
                   <mat-card-title>Anotaciones Spring</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
                   <div class="annotations-list">
-                    <code *ngFor="let annotation of data.analysis.backend_analysis.spring_annotations">{{ annotation }}</code>
+                    <code *ngFor="let annotation of data.analysis.backend.spring_annotations">{{ annotation }}</code>
                   </div>
                 </mat-card-content>
               </mat-card>
@@ -1811,13 +1939,16 @@ export class FileViewerModalComponent {
     .summary-stats { display: flex; gap: 20px; margin-top: 16px; }
     .stat-item { font-size: 14px; }
     .issues-card .mat-card-header { background-color: #fff3cd; }
-    .field-item, .button-item, .entity-field, .endpoint-item { margin-bottom: 15px; padding: 12px; border: 1px solid #eee; border-radius: 4px; }
-    .field-header, .endpoint-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .field-item, .button-item, .entity-field, .endpoint-item, .table-item, .navigation-item, .menu-item, .related-table-item { margin-bottom: 15px; padding: 12px; border: 1px solid #eee; border-radius: 4px; }
+    .field-header, .endpoint-header, .table-header, .navigation-header, .menu-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
     .required-chip { font-size: 11px !important; }
     .field-validation { margin: 0; color: #666; font-size: 12px; }
     .components-list, .dependencies-list, .annotations-list { display: flex; flex-wrap: wrap; gap: 8px; }
     .dependencies-list code, .annotations-list code { background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
     .annotations { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .table-columns, .table-actions { margin-top: 12px; }
+    .column-item { margin-bottom: 8px; padding: 8px; background: #f9f9f9; border-radius: 4px; }
+    .submenu-item { margin-left: 16px; margin-bottom: 4px; }
     .modal-actions { display: flex; gap: 10px; padding: 20px; border-top: 1px solid #eee; justify-content: flex-end; }
   `]
 })
@@ -1860,5 +1991,42 @@ export class AIAnalysisModalComponent {
   exportAnalysis() {
     console.log('Exportando análisis IA...');
     // TODO: Implementar exportación
+  }
+
+  // Métodos para manejar datos que pueden venir como strings JSON
+  getDependencies(): string[] {
+    try {
+      if (typeof this.data.analysis.frontend_analysis?.dependencies === 'string') {
+        return JSON.parse(this.data.analysis.frontend_analysis.dependencies);
+      }
+      return this.data.analysis.frontend_analysis?.dependencies || [];
+    } catch (e) {
+      console.warn('Error parsing dependencies:', e);
+      return [];
+    }
+  }
+
+  getMigrationNotes(): string[] {
+    try {
+      if (typeof this.data.analysis.migration_notes === 'string') {
+        return JSON.parse(this.data.analysis.migration_notes);
+      }
+      return this.data.analysis.migration_notes || [];
+    } catch (e) {
+      console.warn('Error parsing migration_notes:', e);
+      return [];
+    }
+  }
+
+  getPotentialIssues(): string[] {
+    try {
+      if (typeof this.data.analysis.potential_issues === 'string') {
+        return JSON.parse(this.data.analysis.potential_issues);
+      }
+      return this.data.analysis.potential_issues || [];
+    } catch (e) {
+      console.warn('Error parsing potential_issues:', e);
+      return [];
+    }
   }
 }

@@ -94,25 +94,78 @@ class NSDKVectorizationService(RepositoryVectorizationService):
         logger.info(f"Total de archivos NSDK encontrados: {len(nsdk_files)}")
         return nsdk_files
     
-    async def process_file(self, file_path: str) -> Dict[str, Any]:
-        """Procesa un archivo NSDK individual"""
+    async def process_file(self, file_path: str, config_id: str = None, repo_type: str = None, 
+                          branch: str = 'main', vector_embedding_repo = None) -> Dict[str, Any]:
+        """Procesa un archivo NSDK individual con persistencia de embeddings"""
         try:
             # Leer contenido del archivo
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
+            
+            # Calcular hash del contenido para detectar cambios
+            content_hash = self._calculate_content_hash(content)
+            
+            # Verificar si ya existe un embedding para este archivo
+            logger.info(f"[DEBUG] vector_embedding_repo: {vector_embedding_repo is not None}, config_id: {config_id}")
+            if vector_embedding_repo and config_id:
+                existing_embedding = vector_embedding_repo.get_by_file_path(file_path, config_id)
+                logger.info(f"[DEBUG] existing_embedding encontrado: {existing_embedding is not None}")
+                
+                if existing_embedding and not existing_embedding.is_content_changed(content_hash):
+                    logger.info(f"Usando embedding existente para {Path(file_path).name} (sin cambios)")
+                    return {
+                        'success': True,
+                        'metadata': existing_embedding.file_metadata,
+                        'embedding': existing_embedding.embedding,
+                        'content_preview': content[:1000],
+                        'cached': True
+                    }
+                elif existing_embedding and existing_embedding.is_content_changed(content_hash):
+                    logger.info(f"Contenido cambiado para {Path(file_path).name}, recalculando embedding")
             
             # Extraer metadatos
             metadata = self._extract_nsdk_metadata(file_path, content)
             
             # Vectorizar contenido
             vectorization_text = self._create_vectorization_text(file_path, content, metadata)
+            logger.info(f"[IA] Obteniendo embedding para {Path(file_path).name}...")
+            logger.info(f"[IA] Longitud del texto a vectorizar: {len(vectorization_text)} caracteres")
             embedding = await self.llm_service.get_embedding(vectorization_text)
+            logger.info(f"[IA] Embedding obtenido exitosamente para {Path(file_path).name}")
+            
+            # Guardar embedding en la base de datos si tenemos repositorio
+            if vector_embedding_repo and config_id:
+                from ...domain.entities.vector_embedding import VectorEmbedding
+                
+                vector_embedding = VectorEmbedding(
+                    file_path=file_path,
+                    file_name=Path(file_path).name,
+                    file_type=self._get_file_type(file_path),
+                    content_hash=content_hash,
+                    embedding=embedding,
+                    file_metadata=metadata,
+                    config_id=config_id,
+                    repo_type=repo_type or 'source',
+                    repo_branch=branch,
+                    vectorization_batch_id=None  # Se actualizará después si es necesario
+                )
+                
+                if existing_embedding:
+                    # Actualizar embedding existente
+                    existing_embedding.update_embedding(embedding, metadata)
+                    vector_embedding_repo.update(existing_embedding)
+                    logger.info(f"Embedding actualizado para {Path(file_path).name}")
+                else:
+                    # Crear nuevo embedding
+                    vector_embedding_repo.create(vector_embedding)
+                    logger.info(f"Nuevo embedding guardado para {Path(file_path).name}")
             
             return {
                 'success': True,
                 'metadata': metadata,
                 'embedding': embedding,
-                'content_preview': content[:1000]  # Primeros 1000 caracteres
+                'content_preview': content[:1000],
+                'cached': False
             }
             
         except Exception as e:
@@ -122,8 +175,23 @@ class NSDKVectorizationService(RepositoryVectorizationService):
                 'error': str(e)
             }
     
-    async def vectorize_repository(self, repo_path: str, batch: VectorizationBatch) -> VectorizationBatch:
-        """Vectoriza un repositorio NSDK completo"""
+    def _calculate_content_hash(self, content: str) -> str:
+        """Calcula el hash del contenido del archivo"""
+        import hashlib
+        return hashlib.md5(content.encode('utf-8')).hexdigest()
+    
+    def _get_file_type(self, file_path: str) -> str:
+        """Determina el tipo de archivo basado en la extensión"""
+        file_name = Path(file_path).name
+        for ext, pattern in self.nsdk_file_patterns.items():
+            if re.search(pattern, file_name):
+                return ext
+        return 'unknown'
+    
+    async def vectorize_repository(self, repo_path: str, batch: VectorizationBatch, 
+                                  config_id: str = None, repo_type: str = None, 
+                                  branch: str = 'main', vector_embedding_repo = None) -> VectorizationBatch:
+        """Vectoriza un repositorio NSDK completo con persistencia de embeddings"""
         try:
             # Descubrir archivos
             nsdk_files = self.discover_files(repo_path)
@@ -142,16 +210,30 @@ class NSDKVectorizationService(RepositoryVectorizationService):
             batch.start_processing()
             logger.info(f"Iniciando procesamiento de {len(nsdk_files)} archivos NSDK")
             
+            cached_count = 0
+            new_count = 0
+            
             for i, file_path in enumerate(nsdk_files):
                 try:
                     logger.info(f"Procesando archivo {i+1}/{len(nsdk_files)}: {file_path}")
                     
-                    result = await self.process_file(file_path)
+                    result = await self.process_file(
+                        file_path, 
+                        config_id=config_id,
+                        repo_type=repo_type,
+                        branch=branch,
+                        vector_embedding_repo=vector_embedding_repo
+                    )
                     file_id = str(hash(file_path))
                     
                     if result['success']:
                         batch.mark_file_processed(file_id, success=True)
-                        logger.info(f"Archivo {Path(file_path).name} procesado exitosamente")
+                        if result.get('cached', False):
+                            cached_count += 1
+                            logger.info(f"Archivo {Path(file_path).name} procesado (cached)")
+                        else:
+                            new_count += 1
+                            logger.info(f"Archivo {Path(file_path).name} procesado exitosamente (nuevo)")
                     else:
                         batch.mark_file_processed(file_id, success=False)
                         logger.error(f"Error procesando {Path(file_path).name}: {result['error']}")
@@ -166,7 +248,7 @@ class NSDKVectorizationService(RepositoryVectorizationService):
                 logger.warning(f"Fallaron {batch.failed_files} archivos, marcando lote como fallido")
                 batch.fail_processing(f"Fallaron {batch.failed_files} archivos")
             else:
-                logger.info("Todos los archivos procesados exitosamente")
+                logger.info(f"Todos los archivos procesados exitosamente. Cached: {cached_count}, Nuevos: {new_count}")
                 batch.complete_processing()
             
             return batch
@@ -816,9 +898,30 @@ class UnifiedVectorizationService:
             
             # Delegar en el servicio especializado apropiado
             logger.info("8. Delegando en servicio especializado...")
+            
+            # Obtener repositorio de embeddings si está disponible
+            vector_embedding_repo = None
+            try:
+                from ...infrastructure.repositories.vector_embedding_repository import VectorEmbeddingRepository
+                from ...database import get_db
+                db = next(get_db())
+                vector_embedding_repo = VectorEmbeddingRepository(db)
+                logger.info("[OK] Repositorio de embeddings inicializado")
+            except Exception as e:
+                logger.error(f"[ERROR] No se pudo inicializar repositorio de embeddings: {str(e)}")
+                logger.error(f"[ERROR] Traceback completo: {e}")
+                # Continuar sin repositorio de embeddings para que al menos funcione la vectorización básica
+            
             if technology == 'nsdk':
                 logger.info("[OK] Usando servicio NSDK para vectorización")
-                await self.nsdk_service.vectorize_repository(str(repo_path), batch)
+                await self.nsdk_service.vectorize_repository(
+                    str(repo_path), 
+                    batch,
+                    config_id=str(config_id),
+                    repo_type=repo_type,
+                    branch=repo_branch,
+                    vector_embedding_repo=vector_embedding_repo
+                )
             elif technology == 'angular':
                 logger.info("[OK] Usando servicio Angular para vectorización")
                 await self.angular_service.vectorize_repository(str(repo_path), batch)
@@ -829,6 +932,22 @@ class UnifiedVectorizationService:
                 logger.warning(f"[WARNING] Tecnología no reconocida: {technology}. Intentando vectorización genérica...")
                 # Intentar vectorización genérica o fallar
                 batch.fail_processing(f"Tecnología no reconocida: {technology}")
+            
+            # Sincronizar embeddings al Vector Store después de vectorizar
+            if vector_embedding_repo:
+                try:
+                    from .embedding_sync_service import EmbeddingSyncService
+                    sync_service = EmbeddingSyncService(self.vector_store_service)
+                    sync_success = await sync_service.sync_embeddings_to_vector_store(
+                        vector_embedding_repo, 
+                        config_id=str(config_id)
+                    )
+                    if sync_success:
+                        logger.info("[OK] Embeddings sincronizados al Vector Store")
+                    else:
+                        logger.warning("[WARNING] Error sincronizando embeddings al Vector Store")
+                except Exception as e:
+                    logger.error(f"[ERROR] Error en sincronización: {str(e)}")
             
             # El lote ya está almacenado, solo actualizar el estado final
             logger.info(f"[OK] Lote {batch.id} procesado completamente")
@@ -1086,11 +1205,12 @@ class UnifiedVectorizationService:
                 'collectionName': 'nsdk-embeddings'
             }
             
-            # Buscar en el vector store
+            # Buscar en el vector store con threshold más bajo
             results = self.vector_store_service.search_similar(
                 query_embedding, 
                 config,
-                limit=limit
+                limit=limit,
+                threshold=0.3  # Threshold más bajo para obtener más resultados
             )
             
             return results

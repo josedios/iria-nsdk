@@ -74,7 +74,7 @@ class LLMServiceImpl(LLMService):
                 response = await client.post(
                     'https://api.openai.com/v1/embeddings',
                     headers=headers,
-                    json={'input': text, 'model': 'text-embedding-ada-002'},
+                    json={'input': text, 'model': 'text-embedding-3-small'},
                     timeout=30
                 )
                 if response.status_code == 200:
@@ -179,6 +179,9 @@ class LLMServiceImpl(LLMService):
                 
         except Exception as e:
             print(f"Error en chat completion: {e}")
+            print(f"Provider: {self.provider}")
+            print(f"Config: {self.config}")
+            print(f"API Key: {'Set' if self.api_key else 'Not set'}")
             # Fallback a respuesta temporal si hay error
             return '''{
     "analysis_summary": "Error en análisis automático - Fallback temporal",
