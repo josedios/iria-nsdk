@@ -81,37 +81,26 @@
                   <span class="file-count" *ngIf="node.file_count">{{ node.file_count }} archivos</span>
                   <span class="dir-count" *ngIf="node.dir_count">{{ node.dir_count }} directorios</span>
                 </div>
-                <div class="node-actions" *ngIf="isScrFile(node)">
+                <div class="node-actions" *ngIf="node.is_file">
+                  <!-- Botones específicos para ficheros .SCR -->
                   <button mat-icon-button [matTooltip]="'Analizar archivo'" (click)="analyzeScreen(node)"
-                    [disabled]="node.status === 'analyzing'">
+                    [disabled]="node.status === 'analyzing'" *ngIf="isScrFile(node)">
                     <mat-icon>analytics</mat-icon>
                   </button>
                   <button mat-icon-button [matTooltip]="'Ver análisis'" (click)="viewAnalysis(node)"
-                    [disabled]="node.status === 'pending'">
+                    [disabled]="node.status === 'pending'" *ngIf="isScrFile(node)">
                     <mat-icon>visibility</mat-icon>
                   </button>
                   <button mat-icon-button [matTooltip]="'Generar código'" (click)="generateCode(node)"
-                    [disabled]="node.status !== 'analyzed'">
+                    [disabled]="node.status !== 'analyzed'" *ngIf="isScrFile(node)">
                     <mat-icon>code</mat-icon>
                   </button>
-                  <button mat-icon-button [matMenuTriggerFor]="menu" [matTooltip]="'Más opciones'">
-                    <mat-icon>more_vert</mat-icon>
+
+                  <!-- Botón Ver Código para TODOS los ficheros -->
+                  <button mat-icon-button [matTooltip]="'Ver contenido del archivo'" (click)="viewCode(node)">
+                    <mat-icon>description</mat-icon>
                   </button>
 
-                  <mat-menu #menu="matMenu">
-                    <button mat-menu-item (click)="assignDeveloper(node)">
-                      <mat-icon>person</mat-icon>
-                      Asignar Desarrollador
-                    </button>
-                    <button mat-menu-item (click)="viewCode(node)">
-                      <mat-icon>code</mat-icon>
-                      Ver Código
-                    </button>
-                    <button mat-menu-item (click)="exportAnalysis(node)">
-                      <mat-icon>download</mat-icon>
-                      Exportar Análisis
-                    </button>
-                  </mat-menu>
                 </div>
                 <div class="node-stats" *ngIf="node.type === 'module'">
                   <span class="stat-item">{{ getModuleScreenCount(node) }} pantallas</span>
@@ -153,37 +142,26 @@
                   <span class="file-count" *ngIf="node.file_count">{{ node.file_count }} archivos</span>
                   <span class="dir-count" *ngIf="node.dir_count">{{ node.dir_count }} directorios</span>
                 </div>
-                <div class="node-actions" *ngIf="isScrFile(node)">
+                <div class="node-actions" *ngIf="node.is_file">
+                  <!-- Botones específicos para ficheros .SCR -->
                   <button mat-icon-button [matTooltip]="'Analizar archivo'" (click)="analyzeScreen(node)"
-                    [disabled]="node.status === 'analyzing'">
+                    [disabled]="node.status === 'analyzing'" *ngIf="isScrFile(node)">
                     <mat-icon>analytics</mat-icon>
                   </button>
                   <button mat-icon-button [matTooltip]="'Ver análisis'" (click)="viewAnalysis(node)"
-                    [disabled]="node.status === 'pending'">
+                    [disabled]="node.status === 'pending'" *ngIf="isScrFile(node)">
                     <mat-icon>visibility</mat-icon>
                   </button>
                   <button mat-icon-button [matTooltip]="'Generar código'" (click)="generateCode(node)"
-                    [disabled]="node.status !== 'analyzed'">
+                    [disabled]="node.status !== 'analyzed'" *ngIf="isScrFile(node)">
                     <mat-icon>code</mat-icon>
                   </button>
-                  <button mat-icon-button [matMenuTriggerFor]="menu" [matTooltip]="'Más opciones'">
-                    <mat-icon>more_vert</mat-icon>
+
+                  <!-- Botón Ver Código para TODOS los ficheros -->
+                  <button mat-icon-button [matTooltip]="'Ver contenido del archivo'" (click)="viewCode(node)">
+                    <mat-icon>description</mat-icon>
                   </button>
 
-                  <mat-menu #menu="matMenu">
-                    <button mat-menu-item (click)="assignDeveloper(node)">
-                      <mat-icon>person</mat-icon>
-                      Asignar Desarrollador
-                    </button>
-                    <button mat-menu-item (click)="viewCode(node)">
-                      <mat-icon>code</mat-icon>
-                      Ver Código
-                    </button>
-                    <button mat-menu-item (click)="exportAnalysis(node)">
-                      <mat-icon>download</mat-icon>
-                      Exportar Análisis
-                    </button>
-                  </mat-menu>
                 </div>
                 <div class="node-stats" *ngIf="node.type === 'module'">
                   <span class="stat-item">{{ getModuleScreenCount(node) }} pantallas</span>
