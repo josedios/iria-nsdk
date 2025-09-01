@@ -38,6 +38,8 @@ export interface RepositoryTreeNode {
   button_count?: number;
   buttons?: string[];
   expandable?: boolean;
+  analysis_status?: string;  // ← AÑADIR ESTE CAMPO
+  analysis_date?: string;    // ← AÑADIR ESTE CAMPO
 }
 
 export interface RepositoryTreeResponse {

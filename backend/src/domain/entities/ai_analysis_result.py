@@ -65,8 +65,23 @@ class AIAnalysisResult(Base):
                     return []
             return field or []
         
-        # Procesar frontend_analysis para asegurar que dependencies sea un array
+        # Procesar frontend_analysis
         frontend_analysis = self.frontend_analysis
+        if isinstance(frontend_analysis, str):
+            try:
+                frontend_analysis = json.loads(frontend_analysis)
+            except (json.JSONDecodeError, TypeError):
+                frontend_analysis = {}
+        
+        # Procesar backend_analysis
+        backend_analysis = self.backend_analysis
+        if isinstance(backend_analysis, str):
+            try:
+                backend_analysis = json.loads(backend_analysis)
+            except (json.JSONDecodeError, TypeError):
+                backend_analysis = {}
+        
+        # Procesar frontend_analysis para asegurar que dependencies sea un array
         if isinstance(frontend_analysis, dict) and 'dependencies' in frontend_analysis:
             if isinstance(frontend_analysis['dependencies'], str):
                 try:
@@ -86,7 +101,7 @@ class AIAnalysisResult(Base):
             'complexity': self.complexity,
             'estimated_hours': self.estimated_hours,
             'frontend': frontend_analysis,
-            'backend': self.backend_analysis,
+            'backend': backend_analysis,
             'migration_notes': parse_json_field(self.migration_notes),
             'potential_issues': parse_json_field(self.potential_issues),
             'created_at': self.created_at.isoformat() if self.created_at else None,

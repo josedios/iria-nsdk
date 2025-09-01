@@ -345,11 +345,22 @@ export class DynamicDataSource extends DataSource<FlatNode> {
    */
   private convertToFlatNodes(treeNode: RepositoryTreeNode[], level: number): FlatNode[] {
     return treeNode.map(child => {
+      // DEBUG: Log para ver qué está llegando
+      if (child.name === 'd_poliza.scr') {
+        console.log('🔍 DEBUG d_poliza.scr (convertToFlatNodes):', {
+          name: child.name,
+          analysis_status: child.analysis_status,
+          analysis_date: child.analysis_date,
+          is_file: child.is_file,
+          type: child.type
+        });
+      }
+
       return {
         expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
         name: child.name,
         type: child.type,
-        status: child.is_file ? 'pending' : undefined,
+        status: (child.analysis_status as 'pending' | 'analyzing' | 'analyzed' | 'generated' | 'error') || 'pending', // ← USAR EL CAMPO DEL ÁRBOL
         level: level,
         path: child.path,
         id: child.id,

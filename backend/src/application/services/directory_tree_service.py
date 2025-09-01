@@ -160,6 +160,8 @@ class DirectoryTreeService:
                 'fields': file.fields,
                 'button_count': file.button_count,
                 'buttons': file.buttons,
+                'analysis_status': file.analysis_status,  # ← AÑADIR ESTE CAMPO
+                'analysis_date': file.analysis_date.isoformat() if file.analysis_date else None,  # ← AÑADIR ESTE CAMPO
                 'expandable': False,
                 'children': []
             })
@@ -235,6 +237,8 @@ class DirectoryTreeService:
                             'is_file': True,
                             'is_dir': False,
                             'size_kb': size_kb,
+                            'analysis_status': file_analysis.analysis_status if file_analysis else 'pending',  # ← AÑADIR ESTE CAMPO
+                            'analysis_date': file_analysis.analysis_date.isoformat() if file_analysis and file_analysis.analysis_date else None,  # ← AÑADIR ESTE CAMPO
                             'expandable': False,
                             'children': []
                         })
