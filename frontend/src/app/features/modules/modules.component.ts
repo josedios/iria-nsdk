@@ -348,7 +348,7 @@ export class DynamicDataSource extends DataSource<FlatNode> {
       expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
       name: child.name,
       type: child.type,
-      status: 'analyzed',
+      status: child.is_file ? 'pending' : undefined,
       level: level,
       path: child.path,
       id: child.id,
@@ -535,7 +535,7 @@ export class ModulesComponent implements OnInit {
       expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
       name: child.name,
       type: child.type,
-      status: 'analyzed',
+      status: child.is_file ? 'pending' : undefined,
       level: 0,
       path: child.path,
       id: child.id,
@@ -817,6 +817,20 @@ export class ModulesComponent implements OnInit {
       default:
         return 'help';
     }
+  }
+
+  /**
+   * Determina si un nodo representa un fichero .SCR (case-insensitive)
+   */
+  isScrFile(node: FlatNode): boolean {
+    if (!node || !node.is_file) return false;
+    if (node.extension && typeof node.extension === 'string') {
+      if (node.extension.toUpperCase() === 'SCR') return true;
+    }
+    if (node.name && typeof node.name === 'string') {
+      return node.name.toUpperCase().endsWith('.SCR');
+    }
+    return false;
   }
 
   /**
