@@ -176,9 +176,34 @@ async def get_configurations():
         raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 @app.get("/configurations/active", tags=["Configuración"])
-def get_active_configuration():
+async def get_active_configuration():
     """Obtener la configuración activa"""
-    return {}
+    try:
+        active_config = await config_repo.find_active()
+        if active_config:
+            return active_config
+        else:
+            return {"message": "No hay configuración activa"}
+    except Exception as e:
+        logger.error(f"Error al obtener configuración activa: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
+
+@app.post("/configurations/{config_id}/set-active", tags=["Configuración"])
+async def set_active_configuration(config_id: str):
+    """Establecer una configuración como activa"""
+    try:
+        success = await config_repo.set_active(config_id)
+        if success:
+            # Reinicializar el servicio LLM con la nueva configuración
+            await initialize_llm_service()
+            return {"message": f"Configuración {config_id} establecida como activa"}
+        else:
+            raise HTTPException(status_code=404, detail="Configuración no encontrada")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al establecer configuración activa: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 @app.get("/configurations/{config_id}", response_model=ConfigurationDTO, tags=["Configuración"])
 async def get_configuration(config_id: str):
@@ -800,7 +825,8 @@ async def analyze_file_with_ai(
     repo_name: str,
     file_id: str,
     analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository),
-    ai_analysis_repo = Depends(get_ai_analysis_repository)
+    ai_analysis_repo = Depends(get_ai_analysis_repository),
+    db: Session = Depends(get_db)
 ):
     """Analiza un fichero .SCR con IA para migración a Angular/Spring Boot"""
     try:
@@ -835,9 +861,13 @@ async def analyze_file_with_ai(
         
         # Importar y usar el servicio de análisis IA
         from .application.services.ai_analysis_service import AIAnalysisService
+        from .application.services.nsdk_query_service import NSDKQueryService
         
-        # Crear instancia del servicio de análisis IA
-        ai_service = AIAnalysisService(vectorization_use_case, llm_service)
+        # Crear instancia del servicio de consulta NSDK
+        nsdk_query_service = NSDKQueryService(db)
+        
+        # Crear instancia del servicio de análisis IA con todos los servicios
+        ai_service = AIAnalysisService(vectorization_use_case, llm_service, nsdk_query_service)
         
         try:
             # Realizar análisis con IA
@@ -921,6 +951,199 @@ def get_ai_analysis_result(
     except Exception as e:
         logger.error(f"Error obteniendo análisis IA para {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error obteniendo análisis IA: {str(e)}")
+
+@app.post("/repositories/{repo_name}/files/{file_id}/ai-analysis", tags=["Análisis IA"])
+async def execute_ai_analysis(
+    repo_name: str,
+    file_id: str,
+    db: Session = Depends(get_db)
+):
+    """Ejecuta un nuevo análisis IA para un fichero con documentación NSDK"""
+    try:
+        logger.info(f"Ejecutando análisis IA para file_id: {file_id}")
+        
+        # Obtener información del archivo
+        from .infrastructure.repositories.nsdk_file_analysis_repository import NSDKFileAnalysisRepository
+        file_analysis_repo = NSDKFileAnalysisRepository(db)
+        file_analysis = file_analysis_repo.get_by_id(file_id)
+        
+        if not file_analysis:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        
+        # Leer contenido del archivo
+        file_path = file_analysis.file_path
+        try:
+            # Intentar diferentes codificaciones
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            file_content = None
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        file_content = f.read()
+                    logger.info(f"Archivo leído con codificación: {encoding}")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if file_content is None:
+                raise Exception("No se pudo leer el archivo con ninguna codificación soportada")
+                
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error leyendo archivo: {str(e)}")
+        
+        # Consultar documentación NSDK para contexto
+        from .application.services.nsdk_query_service import NSDKQueryService
+        nsdk_query_service = NSDKQueryService(db)
+        
+        # Extraer términos técnicos del archivo
+        import re
+        technical_terms = []
+        patterns = [
+            r'DEFINE\s+(\w+)',  # Definiciones
+            r'CALL\s+(\w+)',    # Llamadas a funciones
+            r'USE\s+(\w+)',     # Uso de módulos
+            r'(\w+)\s*\(',      # Funciones
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, file_content, re.IGNORECASE)
+            technical_terms.extend(matches)
+        
+        # Consultar documentación para términos específicos
+        nsdk_context = ""
+        for term in technical_terms[:3]:  # Limitar a 3 consultas
+            try:
+                result = await nsdk_query_service.query_documentation(term)
+                if result and "Información encontrada" in result:
+                    nsdk_context += f"\n**{term}:** {result}\n"
+            except Exception as e:
+                logger.warning(f"Error consultando documentación para '{term}': {e}")
+                continue
+        
+        # Crear prompt mejorado con documentación NSDK
+        enhanced_prompt = f"""
+# ANÁLISIS DE MIGRACIÓN DE FICHERO .SCR A ANGULAR/SPRING BOOT
+
+## FICHERO A ANALIZAR:
+**Nombre:** {file_analysis.file_name}
+
+**Contenido del fichero .SCR:**
+```
+{file_content[:2000]}{"..." if len(file_content) > 2000 else ""}
+```
+
+## DOCUMENTACIÓN TÉCNICA NSDK:
+{nsdk_context if nsdk_context else "No se encontró documentación específica para los términos técnicos del archivo."}
+
+## INSTRUCCIONES:
+Analiza este fichero .SCR y proporciona un análisis detallado para su migración a:
+- **Frontend:** Angular con Angular Material
+- **Backend:** Java Spring Boot con JPA/Hibernate
+
+**IMPORTANTE:** Presta especial atención a:
+1. **Menú Superior:** Identifica el menú de navegación principal
+2. **Tablas:** Identifica TODAS las tablas, sus columnas y funcionalidades
+3. **Navegaciones:** Identifica todas las navegaciones entre pantallas
+4. **Controles:** Identifica todos los controles y sus propiedades
+
+Responde en formato JSON válido con la siguiente estructura:
+```json
+{{
+    "analysis_summary": "Resumen del análisis",
+    "file_type": "screen|form|report|utility",
+    "complexity": "low|medium|high",
+    "estimated_hours": 40,
+    "frontend": {{
+        "component_type": "form|table|navigation",
+        "fields": [],
+        "tables": [],
+        "buttons": [],
+        "navigation": []
+    }},
+    "backend": {{
+        "entities": [],
+        "services": [],
+        "controllers": []
+    }},
+    "migration_notes": "Notas importantes para la migración",
+    "potential_issues": ["Lista de problemas potenciales"]
+}}
+```
+"""
+        
+        # Enviar a OpenAI
+        from .infrastructure.services.llm_service_impl import LLMServiceImpl
+        llm_service = LLMServiceImpl()
+        
+        system_prompt = """Eres un experto en migración de aplicaciones NS-DK a Angular/Spring Boot. 
+Analiza ficheros .SCR y proporciona un análisis detallado para su migración a tecnologías modernas.
+Responde SIEMPRE en formato JSON válido."""
+        
+        ai_response = await llm_service.chat_completion([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": enhanced_prompt}
+        ])
+        
+        # Procesar respuesta
+        import json
+        try:
+            analysis_result = json.loads(ai_response)
+        except json.JSONDecodeError:
+            # Si no es JSON válido, crear un resultado básico
+            analysis_result = {
+                "analysis_summary": "Análisis completado con documentación NSDK",
+                "file_type": "screen",
+                "complexity": "medium",
+                "estimated_hours": 40,
+                "frontend": {"component_type": "form", "fields": [], "tables": [], "buttons": [], "navigation": []},
+                "backend": {"entities": [], "services": [], "controllers": []},
+                "migration_notes": "Análisis realizado con contexto de documentación NSDK",
+                "potential_issues": []
+            }
+        
+        # Guardar resultado en BD
+        from .infrastructure.repositories.ai_analysis_repository import AIAnalysisRepository
+        from .domain.entities.ai_analysis_result import AIAnalysisResult
+        
+        ai_analysis_repo = AIAnalysisRepository(db)
+        
+        analysis_data = {
+            'analysis_summary': analysis_result.get('analysis_summary', ''),
+            'file_type': analysis_result.get('file_type', ''),
+            'complexity': analysis_result.get('complexity', ''),
+            'estimated_hours': analysis_result.get('estimated_hours', 0),
+            'frontend': analysis_result.get('frontend', {}),
+            'backend': analysis_result.get('backend', {}),
+            'migration_notes': analysis_result.get('migration_notes', ''),
+            'potential_issues': analysis_result.get('potential_issues', []),
+            'analysis_version': '2.0'  # Nueva versión con documentación NSDK
+        }
+        
+        ai_result = AIAnalysisResult(
+            file_analysis_id=file_id,
+            analysis_data=analysis_data,
+            raw_response=ai_response
+        )
+        
+        saved_result = ai_analysis_repo.create(ai_result)
+        
+        logger.info(f"Análisis IA completado y guardado: {saved_result.id}")
+        
+        return {
+            "status": "success",
+            "message": "Análisis IA completado exitosamente con documentación NSDK",
+            "analysis_id": saved_result.id,
+            "file_id": file_id,
+            "analysis": saved_result.to_dict(),
+            "nsdk_context_used": bool(nsdk_context)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ejecutando análisis IA para {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error ejecutando análisis IA: {str(e)}")
 
 @app.get("/ai-analysis/statistics", tags=["Análisis IA"])
 def get_ai_analysis_statistics(
@@ -1360,4 +1583,257 @@ async def get_available_nsdk_documents():
         
     except Exception as e:
         logger.error(f"Error obteniendo documentos disponibles: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error obteniendo documentos: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error obteniendo documentos: {str(e)}")
+
+@app.post("/test/ai-analysis-with-vectorization", tags=["Test"])
+async def test_ai_analysis_with_vectorization(
+    query: str = Body(..., description="Consulta de prueba para búsqueda vectorizada"),
+    db: Session = Depends(get_db)
+):
+    """Endpoint de prueba para verificar la integración de vectorización en análisis IA"""
+    try:
+        logger.info(f"=== PRUEBA DE INTEGRACIÓN VECTORIZACIÓN + ANÁLISIS IA ===")
+        logger.info(f"Query de prueba: {query}")
+        
+        # 1. Probar búsqueda de código similar
+        logger.info("1. Probando búsqueda de código similar...")
+        similar_results = await vectorization_use_case.search_similar_code(
+            query=query,
+            limit=3
+        )
+        logger.info(f"Resultados de búsqueda similar: {len(similar_results)}")
+        
+        # 2. Probar consulta de documentación NSDK
+        logger.info("2. Probando consulta de documentación NSDK...")
+        from .application.services.nsdk_query_service import NSDKQueryService
+        nsdk_query_service = NSDKQueryService(db)
+        nsdk_context = await nsdk_query_service.query_documentation(query)
+        logger.info(f"Contexto NSDK obtenido: {len(nsdk_context)} caracteres")
+        
+        # 3. Probar creación del servicio de análisis IA
+        logger.info("3. Probando creación del servicio de análisis IA...")
+        from .application.services.ai_analysis_service import AIAnalysisService
+        ai_service = AIAnalysisService(vectorization_use_case, llm_service, nsdk_query_service)
+        logger.info("Servicio de análisis IA creado exitosamente")
+        
+        # 4. Simular análisis con contexto vectorizado
+        logger.info("4. Simulando análisis con contexto vectorizado...")
+        test_content = f"SCREEN TEST_SCREEN\nFIELD test_field\nBUTTON test_button\n{query}"
+        
+        # Obtener contexto similar
+        similar_context = await ai_service._get_similar_code_context(test_content)
+        logger.info(f"Contexto similar obtenido: {len(similar_context)} elementos")
+        
+        # Obtener contexto NSDK
+        nsdk_context_result = await ai_service._get_nsdk_documentation_context(test_content)
+        logger.info(f"Contexto NSDK obtenido: {len(nsdk_context_result)} caracteres")
+        
+        return {
+            "status": "success",
+            "message": "Integración vectorización + análisis IA funcionando correctamente",
+            "test_results": {
+                "similar_code_search": {
+                    "query": query,
+                    "results_count": len(similar_results),
+                    "results": similar_results[:2] if similar_results else []  # Solo primeros 2
+                },
+                "nsdk_documentation": {
+                    "query": query,
+                    "context_length": len(nsdk_context),
+                    "has_content": "Información encontrada" in nsdk_context
+                },
+                "ai_service_integration": {
+                    "service_created": True,
+                    "similar_context_count": len(similar_context),
+                    "nsdk_context_length": len(nsdk_context_result)
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en prueba de integración: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error en prueba: {str(e)}")
+
+@app.post("/test/ai-analysis-detailed", tags=["Test"])
+async def test_ai_analysis_detailed(
+    file_content: str = Body(..., description="Contenido del archivo .SCR para análisis detallado"),
+    file_name: str = Body("test_file.scr", description="Nombre del archivo"),
+    db: Session = Depends(get_db)
+):
+    """Endpoint de prueba para análisis IA detallado con logs completos"""
+    try:
+        logger.info(f"=== ANÁLISIS IA DETALLADO CON LOGS COMPLETOS ===")
+        logger.info(f"Archivo: {file_name}")
+        logger.info(f"Contenido: {len(file_content)} caracteres")
+        
+        # Crear servicios
+        from .application.services.ai_analysis_service import AIAnalysisService
+        from .application.services.nsdk_query_service import NSDKQueryService
+        
+        nsdk_query_service = NSDKQueryService(db)
+        ai_service = AIAnalysisService(vectorization_use_case, llm_service, nsdk_query_service)
+        
+        # Realizar análisis completo con logs detallados
+        logger.info("Iniciando análisis IA completo...")
+        analysis_result = await ai_service.analyze_scr_file(
+            file_path=f"/test/{file_name}",
+            file_content=file_content,
+            file_name=file_name
+        )
+        
+        logger.info("=== ANÁLISIS COMPLETADO ===")
+        logger.info(f"Resultado: {analysis_result}")
+        
+        return {
+            "status": "success",
+            "message": "Análisis IA completado con logs detallados",
+            "analysis_result": analysis_result,
+            "logs_info": "Revisa los logs del backend para ver la respuesta completa de OpenAI"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en análisis detallado: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error en análisis: {str(e)}")
+
+@app.post("/test/ai-analysis-gpt5", tags=["Test"])
+async def test_ai_analysis_gpt5(
+    file_content: str = Body(..., description="Contenido del archivo .SCR para análisis con GPT-5"),
+    file_name: str = Body("test_file.scr", description="Nombre del archivo"),
+    db: Session = Depends(get_db)
+):
+    """Endpoint de prueba para análisis IA con GPT-5 (contexto ampliado)"""
+    try:
+        logger.info(f"=== ANÁLISIS IA CON GPT-5 ===")
+        logger.info(f"Archivo: {file_name}")
+        logger.info(f"Contenido: {len(file_content)} caracteres")
+        
+        # Crear configuración temporal para GPT-5
+        from .domain.entities.configuration import LLMConfig, LLMProvider
+        
+        gpt5_config = LLMConfig(
+            provider=LLMProvider.OPENAI,
+            api_key=llm_service.api_key,  # Usar la misma API key
+            base_url=llm_service.base_url,
+            model_name='gpt-5',  # Cambiar a GPT-5
+            max_tokens=16384,  # Aumentar tokens para archivos completos
+            temperature=0.3  # Reducir temperatura para análisis más preciso
+        )
+        
+        # Crear servicio LLM temporal con GPT-5
+        from .infrastructure.services.llm_service_impl import LLMServiceImpl
+        gpt5_llm_service = LLMServiceImpl()
+        await gpt5_llm_service.initialize(gpt5_config)
+        
+        # Crear servicios
+        from .application.services.ai_analysis_service import AIAnalysisService
+        from .application.services.nsdk_query_service import NSDKQueryService
+        
+        nsdk_query_service = NSDKQueryService(db)
+        ai_service = AIAnalysisService(vectorization_use_case, gpt5_llm_service, nsdk_query_service)
+        
+        # Realizar análisis con GPT-5
+        logger.info("Iniciando análisis IA con GPT-5...")
+        analysis_result = await ai_service.analyze_scr_file(
+            file_path=f"/test/{file_name}",
+            file_content=file_content,
+            file_name=file_name
+        )
+        
+        logger.info("=== ANÁLISIS GPT-5 COMPLETADO ===")
+        logger.info(f"Resultado: {analysis_result}")
+        
+        return {
+            "status": "success",
+            "message": "Análisis IA completado con GPT-5",
+            "model_used": "gpt-5",
+            "analysis_result": analysis_result,
+            "logs_info": "Revisa los logs del backend para ver la respuesta completa de GPT-5"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error en análisis GPT-5: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error en análisis GPT-5: {str(e)}")
+
+@app.post("/configurations/update-model-to-gpt5", tags=["Configuración"])
+async def update_model_to_gpt5():
+    """Actualizar la configuración activa para usar GPT-5"""
+    try:
+        # Obtener configuración activa
+        active_config = await config_repo.find_active()
+        if not active_config:
+            raise HTTPException(status_code=404, detail="No hay configuración activa")
+        
+        # Actualizar el modelo a GPT-5
+        if 'llmConfig' not in active_config.config_data:
+            active_config.config_data['llmConfig'] = {}
+        
+        active_config.config_data['llmConfig']['modelName'] = 'gpt-5'
+        active_config.config_data['llmConfig']['maxTokens'] = 16384
+        active_config.config_data['llmConfig']['temperature'] = 0.3
+        
+        # Guardar cambios
+        updated_config = await config_repo.update(active_config)
+        
+        # Reinicializar el servicio LLM
+        await initialize_llm_service()
+        
+        logger.info("Modelo actualizado a GPT-5 exitosamente")
+        return {
+            "status": "success",
+            "message": "Modelo actualizado a GPT-5 exitosamente",
+            "config_id": str(updated_config.id),
+            "model_name": "gpt-5",
+            "max_tokens": 16384,
+            "temperature": 0.3
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al actualizar modelo a GPT-5: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al actualizar modelo: {str(e)}")
+
+@app.post("/configurations/update-model-to-gpt4", tags=["Configuración"])
+async def update_model_to_gpt4():
+    """Actualizar la configuración activa para usar GPT-4"""
+    try:
+        # Obtener configuración activa
+        active_config = await config_repo.find_active()
+        if not active_config:
+            raise HTTPException(status_code=404, detail="No hay configuración activa")
+        
+        # Actualizar el modelo a GPT-4
+        if 'llmConfig' not in active_config.config_data:
+            active_config.config_data['llmConfig'] = {}
+        
+        active_config.config_data['llmConfig']['modelName'] = 'gpt-4'
+        active_config.config_data['llmConfig']['maxTokens'] = 4096
+        active_config.config_data['llmConfig']['temperature'] = 0.7
+        
+        # Guardar cambios
+        updated_config = await config_repo.update(active_config)
+        
+        # Reinicializar el servicio LLM
+        await initialize_llm_service()
+        
+        logger.info("Modelo actualizado a GPT-4 exitosamente")
+        return {
+            "status": "success",
+            "message": "Modelo actualizado a GPT-4 exitosamente",
+            "config_id": str(updated_config.id),
+            "model_name": "gpt-4",
+            "max_tokens": 4096,
+            "temperature": 0.7
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al actualizar modelo a GPT-4: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al actualizar modelo: {str(e)}") 

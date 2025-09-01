@@ -178,10 +178,15 @@ class LLMServiceImpl(LLMService):
                 raise Exception(f"Proveedor LLM no soportado: {self.provider}")
                 
         except Exception as e:
-            print(f"Error en chat completion: {e}")
+            import traceback
+            print(f"=== ERROR EN CHAT COMPLETION ===")
+            print(f"Error: {e}")
             print(f"Provider: {self.provider}")
             print(f"Config: {self.config}")
             print(f"API Key: {'Set' if self.api_key else 'Not set'}")
+            print(f"Traceback completo:")
+            traceback.print_exc()
+            print(f"=== FIN ERROR ===")
             # Fallback a respuesta temporal si hay error
             return '''{
     "analysis_summary": "Error en análisis automático - Fallback temporal",
@@ -198,6 +203,10 @@ class LLMServiceImpl(LLMService):
                                     system_prompt: Optional[str] = None) -> str:
         """Realiza completación de chat usando OpenAI"""
         try:
+            # Verificar configuración
+            if not self.api_key:
+                raise Exception("API Key no configurada para OpenAI")
+            
             # Preparar mensajes para OpenAI
             openai_messages = []
             if system_prompt:
@@ -209,18 +218,36 @@ class LLMServiceImpl(LLMService):
                 'Content-Type': 'application/json'
             }
             
+            # Determinar el parámetro correcto según el modelo
+            model_name = self.config.model_name if hasattr(self.config, 'model_name') else 'gpt-4'
+            max_tokens_value = self.config.max_tokens if hasattr(self.config, 'max_tokens') else 4096
+            temperature_value = self.config.temperature if hasattr(self.config, 'temperature') else 0.7
+            
             payload = {
-                'model': self.config.model_name if hasattr(self.config, 'model_name') else 'gpt-4',
-                'messages': openai_messages,
-                'max_tokens': self.config.max_tokens if hasattr(self.config, 'max_tokens') else 4096,
-                'temperature': self.config.temperature if hasattr(self.config, 'temperature') else 0.7
+                'model': model_name,
+                'messages': openai_messages
             }
+            
+            # GPT-5 tiene restricciones específicas
+            if model_name.startswith('gpt-5'):
+                payload['max_completion_tokens'] = max_tokens_value
+                # GPT-5 no soporta temperature personalizado, solo usa el valor por defecto (1)
+                # No incluimos temperature en el payload para GPT-5
+            else:
+                payload['max_tokens'] = max_tokens_value
+                payload['temperature'] = temperature_value
             
             # Log de entrada
             print("=== OPENAI REQUEST ===")
             print(f"Model: {payload['model']}")
-            print(f"Max tokens: {payload['max_tokens']}")
-            print(f"Temperature: {payload['temperature']}")
+            if 'max_tokens' in payload:
+                print(f"Max tokens: {payload['max_tokens']}")
+            if 'max_completion_tokens' in payload:
+                print(f"Max completion tokens: {payload['max_completion_tokens']}")
+            if 'temperature' in payload:
+                print(f"Temperature: {payload['temperature']}")
+            else:
+                print("Temperature: default (1) - GPT-5 restriction")
             print("Messages:")
             for i, msg in enumerate(openai_messages):
                 print(f"  {i+1}. Role: {msg['role']}")
@@ -232,7 +259,7 @@ class LLMServiceImpl(LLMService):
                     'https://api.openai.com/v1/chat/completions',
                     headers=headers,
                     json=payload,
-                    timeout=60
+                    timeout=300  # Aumentar timeout a 5 minutos para GPT-5
                 )
                 
                 if response.status_code == 200:
@@ -255,6 +282,13 @@ class LLMServiceImpl(LLMService):
                     print("===================")
                     raise Exception(f"OpenAI API error: {response.text}")
                     
+        except httpx.ReadTimeout as e:
+            print(f"=== TIMEOUT ERROR ===")
+            print(f"GPT-5 tardó más de 5 minutos en responder")
+            print(f"Esto es normal para análisis complejos")
+            print(f"Error: {e}")
+            print(f"=====================")
+            raise Exception(f"Timeout: GPT-5 tardó más de 5 minutos en responder. Esto es normal para análisis complejos.")
         except Exception as e:
             print(f"Error OpenAI chat completion: {e}")
             raise

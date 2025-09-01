@@ -36,3 +36,4 @@ CREATE INDEX IF NOT EXISTS idx_nsdk_chunks_embedding ON nsdk_document_chunks USI
 COMMENT ON TABLE nsdk_documents IS 'Documentos técnicos NSDK procesados';
 COMMENT ON TABLE nsdk_document_chunks IS 'Chunks de documentos NSDK con embeddings';
 COMMENT ON COLUMN nsdk_document_chunks.embedding IS 'Embedding vector para búsqueda semántica';
+

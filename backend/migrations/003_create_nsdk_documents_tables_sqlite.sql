@@ -32,3 +32,4 @@ CREATE INDEX IF NOT EXISTS idx_nsdk_documents_name ON nsdk_documents(name);
 CREATE INDEX IF NOT EXISTS idx_nsdk_documents_status ON nsdk_documents(status);
 CREATE INDEX IF NOT EXISTS idx_nsdk_chunks_document_id ON nsdk_document_chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_nsdk_chunks_chunk_index ON nsdk_document_chunks(document_id, chunk_index);
+
