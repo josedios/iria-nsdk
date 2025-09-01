@@ -344,33 +344,35 @@ export class DynamicDataSource extends DataSource<FlatNode> {
    * Convierte RepositoryTreeNode[] a FlatNode[]
    */
   private convertToFlatNodes(treeNode: RepositoryTreeNode[], level: number): FlatNode[] {
-    return treeNode.map(child => ({
-      expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
-      name: child.name,
-      type: child.type,
-      status: child.is_file ? 'pending' : undefined,
-      level: level,
-      path: child.path,
-      id: child.id,
-      developer: undefined, // RepositoryTreeNode no tiene esta propiedad
-      complexity: undefined, // RepositoryTreeNode no tiene esta propiedad
-      estimatedHours: undefined, // RepositoryTreeNode no tiene esta propiedad
-      is_file: child.is_file,
-      is_dir: child.is_dir,
-      file_count: child.file_count,
-      dir_count: child.dir_count,
-      size_kb: child.size_kb,
-      extension: child.extension,
-      line_count: child.line_count,
-      char_count: child.char_count,
-      function_count: child.function_count,
-      functions: child.functions || [],
-      field_count: child.field_count,
-      fields: child.fields || [],
-      button_count: child.button_count,
-      buttons: child.buttons || [],
-      isLoading: false
-    }));
+    return treeNode.map(child => {
+      return {
+        expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
+        name: child.name,
+        type: child.type,
+        status: child.is_file ? 'pending' : undefined,
+        level: level,
+        path: child.path,
+        id: child.id,
+        developer: undefined, // RepositoryTreeNode no tiene esta propiedad
+        complexity: undefined, // RepositoryTreeNode no tiene esta propiedad
+        estimatedHours: undefined, // RepositoryTreeNode no tiene esta propiedad
+        is_file: child.is_file,
+        is_dir: child.is_dir,
+        file_count: child.file_count,
+        dir_count: child.dir_count,
+        size_kb: child.size_kb,
+        extension: child.extension,
+        line_count: child.line_count,
+        char_count: child.char_count,
+        function_count: child.function_count,
+        functions: child.functions || [],
+        field_count: child.field_count,
+        fields: child.fields || [],
+        button_count: child.button_count,
+        buttons: child.buttons || [],
+        isLoading: false
+      };
+    });
   }
 }
 
@@ -930,6 +932,8 @@ export class ModulesComponent implements OnInit {
     this.syncAnalysisWithDatabase();
   }
 
+
+
   /**
    * Construye la estructura de directorios en BD
    */
@@ -993,17 +997,98 @@ export class ModulesComponent implements OnInit {
   }
 
   analyzeScreen(node: FlatNode) {
-    console.log(`Analizando pantalla: ${node.name}`);
+    console.log('=== ANALIZAR ARCHIVO ===');
+    console.log('Nodo:', node);
+    console.log('ID del nodo:', node.id);
+    console.log('Path del nodo:', node.path);
+    console.log('Nombre del nodo:', node.name);
+
+    if (!node.id) {
+      console.error('ID no disponible para análisis');
+      this.snackBar.open(
+        `Error: El archivo ${node.name} no tiene ID asignado. Esto indica que no está registrado en la base de datos.`,
+        'Cerrar',
+        { duration: 5000 }
+      );
+      return;
+    }
+
+    this.performAnalysis(node);
+  }
+
+  private performAnalysis(node: FlatNode) {
+    if (!node.id) {
+      console.error('ID no disponible para análisis');
+      this.snackBar.open('Error: ID de archivo no disponible para análisis', 'Cerrar', { duration: 3000 });
+      return;
+    }
+
+    console.log(`Iniciando análisis IA para: ${node.name}`);
     node.status = 'analyzing';
-    // Simular análisis
-    setTimeout(() => {
-      node.status = 'analyzed';
-    }, 2000);
+
+    const repoName = 'nsdk-sources';
+    this.modulesService.analyzeFileWithAI(repoName, node.id).subscribe({
+      next: (response: any) => {
+        console.log('Análisis IA iniciado:', response);
+        this.snackBar.open(
+          `Análisis IA iniciado para ${node.name}`,
+          'Cerrar',
+          { duration: 4000 }
+        );
+
+        // Simular progreso del análisis (en producción esto vendría del backend)
+        setTimeout(() => {
+          node.status = 'analyzed';
+          this.snackBar.open(
+            `Análisis completado para ${node.name}`,
+            'Cerrar',
+            { duration: 3000 }
+          );
+        }, 5000);
+      },
+      error: (error: any) => {
+        console.error('Error en análisis IA:', error);
+        node.status = 'error';
+        this.snackBar.open(
+          `Error en análisis IA: ${error.error?.detail || error.message}`,
+          'Cerrar',
+          { duration: 5000 }
+        );
+      }
+    });
   }
 
   viewAnalysis(node: FlatNode) {
-    console.log(`Viendo análisis de: ${node.name}`);
-    this.openAnalysisModal(node);
+    if (!node.id) {
+      this.snackBar.open('Error: ID de archivo no disponible', 'Cerrar', { duration: 3000 });
+      return;
+    }
+
+    console.log(`Obteniendo análisis IA de: ${node.name}`);
+    const repoName = 'nsdk-sources';
+
+    this.modulesService.getAIAnalysisResult(repoName, node.id).subscribe({
+      next: (response: any) => {
+        console.log('Análisis IA obtenido:', response);
+        this.openAIAnalysisModal(node, response.analysis);
+      },
+      error: (error: any) => {
+        console.error('Error obteniendo análisis IA:', error);
+        if (error.status === 404) {
+          this.snackBar.open(
+            `No se encontró análisis IA para ${node.name}. Analiza el archivo primero.`,
+            'Cerrar',
+            { duration: 5000 }
+          );
+        } else {
+          this.snackBar.open(
+            `Error obteniendo análisis IA: ${error.error?.detail || error.message}`,
+            'Cerrar',
+            { duration: 5000 }
+          );
+        }
+      }
+    });
   }
 
   generateCode(node: FlatNode) {
@@ -1056,6 +1141,17 @@ export class ModulesComponent implements OnInit {
       data: {
         node: node,
         analysis: analysisData
+      }
+    });
+  }
+
+  openAIAnalysisModal(node: FlatNode, aiAnalysis: any) {
+    this.dialog.open(AIAnalysisModalComponent, {
+      width: '95vw',
+      height: '95vh',
+      data: {
+        node: node,
+        analysis: aiAnalysis
       }
     });
   }
@@ -1477,4 +1573,292 @@ export class FileViewerModalComponent {
     public dialogRef: MatDialogRef<FileViewerModalComponent>,
     @Inject(MAT_DIALOG_DATA) public data: any
   ) { }
+}
+
+@Component({
+  selector: 'app-ai-analysis-modal',
+  standalone: true,
+  imports: [CommonModule, MatTabsModule, MatCardModule, MatChipsModule, MatButtonModule, MatIconModule, MatDividerModule],
+  template: `
+    <div class="ai-analysis-modal">
+      <div class="modal-header">
+        <div>
+          <h2>Análisis IA - {{ data.node.name }}</h2>
+          <div class="analysis-meta">
+            <mat-chip [color]="getComplexityColor(data.analysis.complexity)">{{ getComplexityLabel(data.analysis.complexity) }}</mat-chip>
+            <span class="estimated-hours">{{ data.analysis.estimated_hours || 'N/A' }} horas estimadas</span>
+            <span class="file-type">{{ getFileTypeLabel(data.analysis.file_type) }}</span>
+          </div>
+        </div>
+        <button mat-icon-button (click)="dialogRef.close()">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+      
+      <div class="modal-content">
+        <mat-tab-group>
+          <!-- Resumen Tab -->
+          <mat-tab label="Resumen">
+            <div class="tab-content">
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Análisis General</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p>{{ data.analysis.analysis_summary || 'No hay resumen disponible' }}</p>
+                  
+                  <div class="summary-stats" *ngIf="data.analysis.frontend_analysis">
+                    <div class="stat-item">
+                      <strong>Campos:</strong> {{ data.analysis.frontend_analysis.fields?.length || 0 }}
+                    </div>
+                    <div class="stat-item">
+                      <strong>Botones:</strong> {{ data.analysis.frontend_analysis.buttons?.length || 0 }}
+                    </div>
+                    <div class="stat-item">
+                      <strong>Endpoints:</strong> {{ data.analysis.backend_analysis?.endpoints?.length || 0 }}
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.migration_notes?.length">
+                <mat-card-header>
+                  <mat-card-title>Notas de Migración</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <ul>
+                    <li *ngFor="let note of data.analysis.migration_notes">{{ note }}</li>
+                  </ul>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.potential_issues?.length" class="issues-card">
+                <mat-card-header>
+                  <mat-card-title>⚠️ Problemas Potenciales</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <ul>
+                    <li *ngFor="let issue of data.analysis.potential_issues">{{ issue }}</li>
+                  </ul>
+                </mat-card-content>
+              </mat-card>
+            </div>
+          </mat-tab>
+          
+          <!-- Frontend Tab -->
+          <mat-tab label="Frontend (Angular)">
+            <div class="tab-content" *ngIf="data.analysis.frontend_analysis">
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Componente Angular</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="component-info">
+                    <p><strong>Tipo:</strong> {{ data.analysis.frontend_analysis.component_type || 'N/A' }}</p>
+                    <p><strong>Ruta:</strong> {{ data.analysis.frontend_analysis.routing || 'N/A' }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend_analysis.fields?.length">
+                <mat-card-header>
+                  <mat-card-title>Campos del Formulario</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="field-item" *ngFor="let field of data.analysis.frontend_analysis.fields">
+                    <div class="field-header">
+                      <strong>{{ field.name }}</strong>
+                      <mat-chip [color]="field.required ? 'primary' : 'default'">
+                        {{ field.type }}
+                      </mat-chip>
+                      <mat-chip *ngIf="field.required" color="warn" class="required-chip">Requerido</mat-chip>
+                    </div>
+                    <p class="field-validation" *ngIf="field.validation">{{ field.validation }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend_analysis.buttons?.length">
+                <mat-card-header>
+                  <mat-card-title>Botones</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="button-item" *ngFor="let button of data.analysis.frontend_analysis.buttons">
+                    <mat-chip [color]="getButtonColor(button.action)">{{ button.name }}</mat-chip>
+                    <span>{{ button.description || button.action }}</span>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend_analysis.angular_components?.length">
+                <mat-card-header>
+                  <mat-card-title>Componentes Angular Material</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="components-list">
+                    <mat-chip *ngFor="let component of data.analysis.frontend_analysis.angular_components" color="accent">
+                      {{ component }}
+                    </mat-chip>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.frontend_analysis.dependencies?.length">
+                <mat-card-header>
+                  <mat-card-title>Dependencias NPM</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="dependencies-list">
+                    <code *ngFor="let dep of data.analysis.frontend_analysis.dependencies">{{ dep }}</code>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+            </div>
+          </mat-tab>
+          
+          <!-- Backend Tab -->
+          <mat-tab label="Backend (Spring Boot)">
+            <div class="tab-content" *ngIf="data.analysis.backend_analysis">
+              <mat-card>
+                <mat-card-header>
+                  <mat-card-title>Entidad JPA</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="entity-info">
+                    <p><strong>Nombre:</strong> {{ data.analysis.backend_analysis.entity_name || 'N/A' }}</p>
+                    <p><strong>Tabla BD:</strong> {{ data.analysis.backend_analysis.database_table || 'N/A' }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.backend_analysis.fields?.length">
+                <mat-card-header>
+                  <mat-card-title>Campos de la Entidad</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="entity-field" *ngFor="let field of data.analysis.backend_analysis.fields">
+                    <div class="field-header">
+                      <strong>{{ field.name }}</strong>
+                      <mat-chip color="primary">{{ field.java_type }}</mat-chip>
+                      <mat-chip color="default">{{ field.database_type }}</mat-chip>
+                    </div>
+                    <div class="annotations" *ngIf="field.jpa_annotations?.length">
+                      <code *ngFor="let annotation of field.jpa_annotations">{{ annotation }}</code>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.backend_analysis.endpoints?.length">
+                <mat-card-header>
+                  <mat-card-title>Endpoints REST</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="endpoint-item" *ngFor="let endpoint of data.analysis.backend_analysis.endpoints">
+                    <div class="endpoint-header">
+                      <mat-chip [color]="getMethodColor(endpoint.method)">{{ endpoint.method }}</mat-chip>
+                      <code>{{ endpoint.path }}</code>
+                    </div>
+                    <p>{{ endpoint.description }}</p>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.backend_analysis.business_logic">
+                <mat-card-header>
+                  <mat-card-title>Lógica de Negocio</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p>{{ data.analysis.backend_analysis.business_logic }}</p>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card *ngIf="data.analysis.backend_analysis.spring_annotations?.length">
+                <mat-card-header>
+                  <mat-card-title>Anotaciones Spring</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="annotations-list">
+                    <code *ngFor="let annotation of data.analysis.backend_analysis.spring_annotations">{{ annotation }}</code>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+            </div>
+          </mat-tab>
+        </mat-tab-group>
+      </div>
+      
+      <div class="modal-actions">
+        <button mat-raised-button color="primary" (click)="generateCode()">
+          <mat-icon>code</mat-icon>
+          Generar Código
+        </button>
+        <button mat-raised-button (click)="exportAnalysis()">
+          <mat-icon>download</mat-icon>
+          Exportar Análisis
+        </button>
+        <button mat-button (click)="dialogRef.close()">Cerrar</button>
+      </div>
+    </div>
+  `,
+  styles: [`
+    .ai-analysis-modal { height: 100%; display: flex; flex-direction: column; }
+    .modal-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 20px; border-bottom: 1px solid #eee; }
+    .analysis-meta { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+    .estimated-hours, .file-type { font-size: 14px; color: #666; }
+    .modal-content { flex: 1; overflow: auto; padding: 20px; }
+    .tab-content { display: flex; flex-direction: column; gap: 20px; }
+    .summary-stats { display: flex; gap: 20px; margin-top: 16px; }
+    .stat-item { font-size: 14px; }
+    .issues-card .mat-card-header { background-color: #fff3cd; }
+    .field-item, .button-item, .entity-field, .endpoint-item { margin-bottom: 15px; padding: 12px; border: 1px solid #eee; border-radius: 4px; }
+    .field-header, .endpoint-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .required-chip { font-size: 11px !important; }
+    .field-validation { margin: 0; color: #666; font-size: 12px; }
+    .components-list, .dependencies-list, .annotations-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .dependencies-list code, .annotations-list code { background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+    .annotations { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .modal-actions { display: flex; gap: 10px; padding: 20px; border-top: 1px solid #eee; justify-content: flex-end; }
+  `]
+})
+export class AIAnalysisModalComponent {
+  constructor(
+    public dialogRef: MatDialogRef<AIAnalysisModalComponent>,
+    @Inject(MAT_DIALOG_DATA) public data: any
+  ) { }
+
+  getComplexityColor(complexity: string): string {
+    const colors = { 'low': 'primary', 'medium': 'accent', 'high': 'warn' };
+    return colors[complexity as keyof typeof colors] || 'default';
+  }
+
+  getComplexityLabel(complexity: string): string {
+    const labels = { 'low': 'Baja', 'medium': 'Media', 'high': 'Alta' };
+    return labels[complexity as keyof typeof labels] || complexity || 'N/A';
+  }
+
+  getFileTypeLabel(fileType: string): string {
+    const labels = { 'screen': 'Pantalla', 'form': 'Formulario', 'report': 'Reporte', 'utility': 'Utilidad' };
+    return labels[fileType as keyof typeof labels] || fileType || 'N/A';
+  }
+
+  getButtonColor(action: string): string {
+    const colors = { 'save': 'primary', 'delete': 'warn', 'cancel': 'default', 'search': 'accent' };
+    return colors[action as keyof typeof colors] || 'default';
+  }
+
+  getMethodColor(method: string): string {
+    const colors = { 'GET': 'primary', 'POST': 'accent', 'PUT': 'warn', 'DELETE': 'warn' };
+    return colors[method as keyof typeof colors] || 'default';
+  }
+
+  generateCode() {
+    console.log('Generando código desde análisis IA...');
+    // TODO: Implementar generación de código
+  }
+
+  exportAnalysis() {
+    console.log('Exportando análisis IA...');
+    // TODO: Implementar exportación
+  }
 }

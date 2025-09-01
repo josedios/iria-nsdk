@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from datetime import datetime
 from src.infrastructure.repositories.nsdk_directory_repository import NSDKDirectoryRepository
 from src.infrastructure.repositories.nsdk_file_analysis_repository import NSDKFileAnalysisRepository
 from src.domain.entities.nsdk_directory import NSDKDirectory
@@ -27,40 +28,49 @@ class DirectoryTreeService:
         # Verificar si ya existe un directorio raíz para este repositorio
         existing_root = self.directory_repo.get_root_directories(repository_name)
         if existing_root:
-            logger.info(f"Ya existe estructura de directorios para {repository_name}, usando directorio existente")
-            return existing_root[0].id
+            logger.info(f"Ya existe estructura de directorios para {repository_name}, añadiendo solo directorios nuevos")
+            root_dir_id = existing_root[0].id
+        else:
+            # Crear directorio raíz solo si no existe
+            root_directory = NSDKDirectory(
+                name=root_path.name,
+                path=str(root_path),
+                repository_name=repository_name,
+                parent_id=None,
+                level=0
+            )
+            root_dir = self.directory_repo.create_directory(root_directory)
+            root_dir_id = root_dir.id
+            logger.info(f"Directorio raíz creado para {repository_name}")
         
-        # Crear directorio raíz solo si no existe
-        root_directory = NSDKDirectory(
-            name=root_path.name,
-            path=str(root_path),
-            repository_name=repository_name,
-            parent_id=None,
-            level=0
-        )
+        # Construir árbol recursivamente (solo añadirá lo que falta)
+        self._build_directory_tree_recursive(root_path, root_dir_id, repository_name, 1)
         
-        root_dir = self.directory_repo.create_directory(root_directory)
-        
-        # Construir árbol recursivamente
-        self._build_directory_tree_recursive(root_path, root_dir.id, repository_name, 1)
-        
-        return root_dir.id
+        return root_dir_id
     
     def _build_directory_tree_recursive(self, current_path: Path, parent_id: str, repository_name: str, level: int):
         """Construye recursivamente la estructura de directorios"""
         try:
             for item in current_path.iterdir():
                 if item.is_dir():
-                    # Crear directorio
-                    directory = NSDKDirectory(
-                        name=item.name,
-                        path=str(item),
-                        repository_name=repository_name,
-                        parent_id=parent_id,
-                        level=level
-                    )
+                    # Verificar si el directorio ya existe en la BD
+                    existing_dir = self.directory_repo.get_directory_by_path(str(item), repository_name)
                     
-                    created_dir = self.directory_repo.create_directory(directory)
+                    if existing_dir:
+                        logger.info(f"Directorio ya existe en BD: {item.name}, usando existente")
+                        created_dir = existing_dir
+                    else:
+                        # Crear directorio solo si no existe
+                        directory = NSDKDirectory(
+                            name=item.name,
+                            path=str(item),
+                            repository_name=repository_name,
+                            parent_id=parent_id,
+                            level=level
+                        )
+                        
+                        created_dir = self.directory_repo.create_directory(directory)
+                        logger.info(f"Directorio creado: {item.name}")
                     
                     # Recursión para subdirectorios
                     self._build_directory_tree_recursive(item, created_dir.id, repository_name, level + 1)
@@ -175,10 +185,52 @@ class DirectoryTreeService:
                             size_kb = round(item.stat().st_size / 1024.0, 2)
                         except Exception:
                             size_kb = None
+                        # Buscar si existe análisis en BD para este archivo
+                        file_analysis = self.file_repo.get_by_file_path(file_path_str, directory.repository_name)
+                        logger.info(f"Buscando archivo {item.name} en BD: {'encontrado' if file_analysis else 'no encontrado'}")
+                        
+                        # Si no existe y es un archivo .SCR, crear registro automáticamente
+                        if not file_analysis and item.name.upper().endswith('.SCR'):
+                            logger.info(f"Creando registro automático para archivo .SCR: {item.name}")
+                            from ...domain.entities.nsdk_file_analysis import NSDKFileAnalysis
+                            from datetime import datetime
+                            
+                            try:
+                                # Leer contenido para obtener metadatos básicos
+                                content = item.read_text(encoding='utf-8', errors='ignore')
+                                lines = content.split('\n')
+                                
+                                new_analysis = NSDKFileAnalysis(
+                                    file_path=file_path_str,
+                                    file_name=item.name,
+                                    file_type='screen',
+                                    repository_name=directory.repository_name,
+                                    line_count=len(lines),
+                                    char_count=len(content),
+                                    size_kb=size_kb,
+                                    function_count=0,
+                                    functions=[],
+                                    field_count=0,
+                                    fields=[],
+                                    button_count=0,
+                                    buttons=[],
+                                    analysis_status='pending',
+                                    analysis_date=datetime.utcnow()
+                                )
+                                
+                                file_analysis = self.file_repo.create(new_analysis)
+                                logger.info(f"Registro automático creado para {item.name}")
+                                
+                            except Exception as e:
+                                logger.warning(f"No se pudo crear registro automático para {item.name}: {str(e)}")
+                        
+                        file_id = file_analysis.id if file_analysis else None
+                        logger.info(f"Archivo {item.name} - ID asignado: {file_id}")
+                        
                         result['children'].append({
-                            'id': None,
+                            'id': file_id,
                             'name': item.name,
-                            'type': 'other',
+                            'type': 'screen' if item.name.upper().endswith('.SCR') else 'other',
                             'path': file_path_str,
                             'is_file': True,
                             'is_dir': False,
@@ -190,6 +242,8 @@ class DirectoryTreeService:
             logger.warning(f"Fallback de listado de archivos en disco falló para {directory.path}: {str(e)}")
         
         return result
+    
+
     
     def get_root_structure(self, repository_name: str) -> Dict[str, Any]:
         """Obtiene solo la estructura raíz del repositorio (nivel 0)"""

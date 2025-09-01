@@ -65,11 +65,31 @@ async def test_database():
         configs = db.query(Configuration).all()
         logger.info(f"[OK] Tabla de configuraciones accesible: {len(configs)} configuraciones encontradas")
         
+        # Probar tabla nsdk_file_analyses específicamente
+        try:
+            result = db.execute(text("SELECT COUNT(*) FROM nsdk_file_analyses"))
+            file_analyses_count = result.scalar()
+            logger.info(f"[OK] Tabla nsdk_file_analyses accesible: {file_analyses_count} registros encontrados")
+        except Exception as e:
+            logger.error(f"[ERROR] Error accediendo a nsdk_file_analyses: {e}")
+            file_analyses_count = "ERROR"
+        
+        # Probar tabla ai_analysis_results específicamente
+        try:
+            result = db.execute(text("SELECT COUNT(*) FROM ai_analysis_results"))
+            ai_results_count = result.scalar()
+            logger.info(f"[OK] Tabla ai_analysis_results accesible: {ai_results_count} registros encontrados")
+        except Exception as e:
+            logger.error(f"[ERROR] Error accediendo a ai_analysis_results: {e}")
+            ai_results_count = "ERROR"
+        
         db.close()
         return {
             "message": "Conexión a base de datos exitosa",
             "status": "success",
             "configs_count": len(configs),
+            "file_analyses_count": file_analyses_count,
+            "ai_results_count": ai_results_count,
             "database_url": DATABASE_URL.replace("postgres:postgres", "***:***")  # Ocultar credenciales
         }
         
@@ -107,6 +127,12 @@ repo_manager = RepositoryManagerService()
 def get_analysis_repository():
     db = next(get_db())
     return NSDKFileAnalysisRepository(db)
+
+# Instancia del repositorio de análisis IA
+def get_ai_analysis_repository():
+    db = next(get_db())
+    from .infrastructure.repositories.ai_analysis_repository import AIAnalysisRepository
+    return AIAnalysisRepository(db)
 
 # Instancia del servicio de sincronización de análisis
 def get_analysis_sync_service():
@@ -496,6 +522,8 @@ async def build_repository_tree(repo_name: str):
         logger.error(f"Error construyendo estructura de directorios para {repo_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
+
+
 @app.get("/modules/{module_id}", tags=["Módulos"])
 def get_module(module_id: str):
     """Obtener un módulo por ID"""
@@ -722,4 +750,133 @@ def cleanup_orphaned_analyses(
         }
     except Exception as e:
         logger.error(f"Error en limpieza de análisis huérfanos para {repo_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en limpieza: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error en limpieza: {str(e)}")
+
+@app.post("/repositories/{repo_name}/files/{file_id}/analyze-ai", tags=["Análisis IA"])
+async def analyze_file_with_ai(
+    repo_name: str,
+    file_id: str,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository),
+    ai_analysis_repo = Depends(get_ai_analysis_repository)
+):
+    """Analiza un fichero .SCR con IA para migración a Angular/Spring Boot"""
+    try:
+        # Obtener el fichero de la BD
+        file_analysis = analysis_repo.get_by_id(file_id)
+        if not file_analysis:
+            raise HTTPException(status_code=404, detail=f"Fichero {file_id} no encontrado")
+        
+        # Verificar que es un fichero .SCR
+        if not file_analysis.file_name.upper().endswith('.SCR'):
+            raise HTTPException(status_code=400, detail="Solo se pueden analizar ficheros .SCR")
+        
+        # Verificar que el fichero existe en disco
+        file_path = Path(file_analysis.file_path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Fichero no encontrado en disco")
+        
+        # Leer contenido del fichero
+        try:
+            file_content = file_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error leyendo fichero: {str(e)}")
+        
+        # Marcar como analizando
+        file_analysis.analysis_status = "analyzing"
+        analysis_repo.update(file_analysis)
+        
+        logger.info(f"Iniciando análisis IA para {file_analysis.file_name}")
+        
+        # Importar y usar el servicio de análisis IA
+        from .application.services.ai_analysis_service import AIAnalysisService
+        
+        # Crear instancia del servicio de análisis IA
+        ai_service = AIAnalysisService(vectorization_use_case, llm_service)
+        
+        try:
+            # Realizar análisis con IA
+            analysis_result = await ai_service.analyze_scr_file(
+                file_path=str(file_path),
+                file_content=file_content,
+                file_name=file_analysis.file_name
+            )
+            
+            # Guardar resultado del análisis en BD
+            from .domain.entities.ai_analysis_result import AIAnalysisResult
+            
+            ai_result = AIAnalysisResult(
+                file_analysis_id=file_id,
+                analysis_data=analysis_result,
+                raw_response=str(analysis_result)
+            )
+            
+            saved_ai_result = ai_analysis_repo.create(ai_result)
+            
+            # Actualizar estado en BD
+            file_analysis.analysis_status = "analyzed"
+            analysis_repo.update(file_analysis)
+            
+            logger.info(f"Análisis IA completado y guardado para {file_analysis.file_name}")
+            
+            return {
+                "file_id": file_id,
+                "file_name": file_analysis.file_name,
+                "status": "analyzed",
+                "message": f"Análisis IA completado para {file_analysis.file_name}",
+                "analysis_result": analysis_result,
+                "analysis_id": saved_ai_result.id,
+                "content_length": len(file_content)
+            }
+            
+        except Exception as ai_error:
+            logger.error(f"Error en análisis IA: {str(ai_error)}")
+            
+            # Marcar como error en BD
+            file_analysis.analysis_status = "error"
+            analysis_repo.update(file_analysis)
+            
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Error en análisis IA: {str(ai_error)}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en análisis IA para {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en análisis IA: {str(e)}")
+
+@app.get("/repositories/{repo_name}/files/{file_id}/ai-analysis", tags=["Análisis IA"])
+def get_ai_analysis_result(
+    repo_name: str,
+    file_id: str,
+    ai_analysis_repo = Depends(get_ai_analysis_repository)
+):
+    """Obtiene el resultado del análisis IA más reciente para un fichero"""
+    try:
+        ai_result = ai_analysis_repo.get_by_file_analysis_id(file_id)
+        if not ai_result:
+            raise HTTPException(status_code=404, detail="No se encontró análisis IA para este fichero")
+        
+        return {
+            "file_id": file_id,
+            "analysis": ai_result.to_dict()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error obteniendo análisis IA para {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo análisis IA: {str(e)}")
+
+@app.get("/ai-analysis/statistics", tags=["Análisis IA"])
+def get_ai_analysis_statistics(
+    ai_analysis_repo = Depends(get_ai_analysis_repository)
+):
+    """Obtiene estadísticas de los análisis IA realizados"""
+    try:
+        stats = ai_analysis_repo.get_statistics()
+        return stats
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas de análisis IA: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}") 

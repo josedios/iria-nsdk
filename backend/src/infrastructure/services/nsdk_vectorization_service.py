@@ -1080,9 +1080,16 @@ class UnifiedVectorizationService:
             if not query_embedding:
                 raise Exception("No se pudo obtener embedding de la consulta")
             
+            # Configuración por defecto para el vector store
+            config = {
+                'type': 'faiss',  # Por defecto FAISS
+                'collectionName': 'nsdk-embeddings'
+            }
+            
             # Buscar en el vector store
             results = self.vector_store_service.search_similar(
                 query_embedding, 
+                config,
                 limit=limit
             )
             

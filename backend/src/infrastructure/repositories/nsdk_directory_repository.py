@@ -68,6 +68,32 @@ class NSDKDirectoryRepository:
             updated_at=db_directory.updated_at
         )
     
+    def get_directory_by_path(self, path: str, repository_name: str) -> Optional[NSDKDirectory]:
+        """Obtiene un directorio por su ruta completa y repositorio"""
+        db_directory = self.db_session.query(NSDKDirectoryModel).filter(
+            and_(
+                NSDKDirectoryModel.path == path,
+                NSDKDirectoryModel.repository_name == repository_name
+            )
+        ).first()
+        
+        if not db_directory:
+            return None
+        
+        return NSDKDirectory(
+            id=db_directory.id,
+            name=db_directory.name,
+            path=db_directory.path,
+            repository_name=db_directory.repository_name,
+            parent_id=db_directory.parent_id,
+            level=db_directory.level,
+            file_count=db_directory.file_count,
+            dir_count=db_directory.dir_count,
+            total_size_kb=db_directory.total_size_kb,
+            created_at=db_directory.created_at,
+            updated_at=db_directory.updated_at
+        )
+    
     def get_children_by_parent_id(self, parent_id: str) -> List[NSDKDirectory]:
         """Obtiene los hijos directos de un directorio"""
         try:
@@ -204,3 +230,5 @@ class NSDKDirectoryRepository:
         except Exception:
             self.db_session.rollback()
             return False
+    
+

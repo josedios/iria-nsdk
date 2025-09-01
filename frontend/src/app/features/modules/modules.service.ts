@@ -290,4 +290,27 @@ export class ModulesService {
       `${this.apiUrl}/repositories/${repoName}/file-content${query}`
     );
   }
+
+  /**
+   * Inicia análisis con IA de un fichero .SCR
+   */
+  analyzeFileWithAI(repoName: string, fileId: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/repositories/${repoName}/files/${fileId}/analyze-ai`, {});
+  }
+
+  /**
+   * Obtiene el resultado del análisis IA de un fichero
+   */
+  getAIAnalysisResult(repoName: string, fileId: string): Observable<any> {
+    return this.http.get(`${this.apiUrl}/repositories/${repoName}/files/${fileId}/ai-analysis`);
+  }
+
+  /**
+   * Obtiene estadísticas de análisis IA
+   */
+  getAIAnalysisStatistics(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/ai-analysis/statistics`);
+  }
+
+
 }

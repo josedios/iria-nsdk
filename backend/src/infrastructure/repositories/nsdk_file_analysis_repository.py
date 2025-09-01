@@ -74,6 +74,7 @@ class NSDKFileAnalysisRepository:
     def get_by_file_path(self, file_path: str, repository_name: str) -> Optional[NSDKFileAnalysis]:
         """Obtiene un análisis por ruta de archivo y repositorio"""
         try:
+            logger.info(f"Buscando archivo en BD - Path: {file_path}, Repo: {repository_name}")
             model = self.db.query(NSDKFileAnalysisModel).filter(
                 and_(
                     NSDKFileAnalysisModel.file_path == file_path,
@@ -81,7 +82,9 @@ class NSDKFileAnalysisRepository:
                 )
             ).first()
             
-            return self._model_to_entity(model) if model else None
+            result = self._model_to_entity(model) if model else None
+            logger.info(f"Resultado de búsqueda: {'encontrado' if result else 'no encontrado'}")
+            return result
             
         except Exception as e:
             logger.error(f"Error obteniendo análisis por ruta {file_path}: {str(e)}")

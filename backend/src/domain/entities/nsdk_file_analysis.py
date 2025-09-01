@@ -2,10 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, Boolean, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-
-Base = declarative_base()
+from ...database import Base
 
 @dataclass
 class NSDKFileAnalysis:

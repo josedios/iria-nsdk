@@ -164,8 +164,84 @@ class LLMServiceImpl(LLMService):
     async def chat_completion(self, messages: List[Dict[str, str]], 
                             system_prompt: Optional[str] = None) -> str:
         """Realiza una completación de chat genérica"""
-        # TODO: Implementar chat real
-        return "Respuesta temporal del chat"
+        # TODO: Implementar chat real con proveedores LLM
+        # Por ahora, devolver una respuesta JSON válida temporal
+        return '''{
+    "analysis_summary": "Análisis automático de pantalla .SCR - Pantalla de alta de usuarios con campos de formulario y botones de acción",
+    "file_type": "screen",
+    "complexity": "medium",
+    "estimated_hours": "8",
+    "frontend": {
+        "screen_type": "form",
+        "title": "Alta de Usuarios",
+        "fields": [
+            {
+                "name": "nombre",
+                "type": "text",
+                "required": true,
+                "validation": "Campo obligatorio"
+            },
+            {
+                "name": "email",
+                "type": "text",
+                "required": true,
+                "validation": "Formato de email válido"
+            }
+        ],
+        "buttons": [
+            {
+                "name": "guardar",
+                "action": "save",
+                "description": "Guardar usuario"
+            },
+            {
+                "name": "cancelar",
+                "action": "cancel",
+                "description": "Cancelar operación"
+            }
+        ],
+        "angular_components": ["MatFormField", "MatButton", "MatInput"],
+        "routing": "/usuarios/alta",
+        "dependencies": ["@angular/forms", "@angular/material"]
+    },
+    "backend": {
+        "entity_name": "Usuario",
+        "database_table": "usuarios",
+        "fields": [
+            {
+                "name": "nombre",
+                "java_type": "String",
+                "jpa_annotations": ["@Column", "@NotNull"],
+                "database_type": "VARCHAR(255)"
+            },
+            {
+                "name": "email",
+                "java_type": "String",
+                "jpa_annotations": ["@Column", "@NotNull", "@Email"],
+                "database_type": "VARCHAR(255)"
+            }
+        ],
+        "endpoints": [
+            {
+                "method": "POST",
+                "path": "/api/usuarios",
+                "description": "Crear nuevo usuario"
+            }
+        ],
+        "business_logic": "Validación de datos de usuario y persistencia en base de datos",
+        "spring_annotations": ["@RestController", "@Service", "@Repository"]
+    },
+    "migration_notes": [
+        "Implementar validaciones de frontend con Angular Reactive Forms",
+        "Configurar CORS para comunicación frontend-backend",
+        "Implementar manejo de errores en ambos lados"
+    ],
+    "potential_issues": [
+        "Verificar compatibilidad de tipos de datos entre NSDK y Java",
+        "Considerar migración de reglas de negocio existentes",
+        "Validar permisos y seguridad en la nueva implementación"
+    ]
+}'''
     
     @staticmethod
     def test_connection(config: dict) -> (bool, str):
