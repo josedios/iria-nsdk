@@ -43,5 +43,7 @@ def create_tables():
     from .domain.entities.vectorization_batch import VectorizationBatch
     from .domain.entities.nsdk_directory import NSDKDirectory
     from .domain.entities.vector_embedding import VectorEmbedding
+    from .domain.entities.nsdk_document import NSDKDocument
+    from .domain.entities.nsdk_document_chunk import NSDKDocumentChunk
     
     Base.metadata.create_all(bind=engine) 

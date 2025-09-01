@@ -3,17 +3,38 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
-export interface VectorizeRepositoryRequest {
-    config_id: string;  // ID de la configuración
-    repo_type: string;  // Tipo de repositorio: 'source', 'frontend', 'backend'
-    branch: string;
+export interface NSDKDocument {
+    id: string;
+    name: string;
+    file_path: string;
+    file_size: number;
+    status: string;
+    total_chunks: number;
+    created_at: string;
+    updated_at: string;
 }
 
-export interface VectorizeModuleRequest {
-    config_id: string;  // ID de la configuración
-    repo_type: string;  // Tipo de repositorio: 'source', 'frontend', 'backend'
-    module_path: string;
-    branch: string;
+export interface DocumentUploadResponse {
+    status: string;
+    message: string;
+    document_id: string;
+    document_name: string;
+}
+
+export interface DocumentQueryResponse {
+    status: string;
+    query: string;
+    result: string;
+}
+
+export interface DocumentStats {
+    total_documents: number;
+    total_chunks: number;
+    documents: Array<{
+        document_id: string;
+        chunk_count: number;
+        total_text_length: number;
+    }>;
 }
 
 export interface SearchCodeRequest {
@@ -23,62 +44,26 @@ export interface SearchCodeRequest {
 
 export interface VectorizationBatch {
     id: string;
-    name: string;
-    batch_type: string;
-    config_id: string;
-    repo_type: string;
-    source_repo_branch: string;
     status: string;
-    total_files: number;
     processed_files: number;
-    successful_files: number;
-    failed_files: number;
-    progress_percentage: number;
-    success_rate: number;
-    started_at?: string;
-    completed_at?: string;
-    created_at: string;
-    updated_at: string;
+    total_files: number;
 }
 
 export interface VectorizationStats {
     total_files: number;
     vectorized_files: number;
-    pending_files: number;
-    error_files: number;
-    last_vectorization?: string;
+    last_vectorization: string;
     by_repository_type?: {
-        nsdk: {
-            total: number;
-            vectorized: number;
-            pending: number;
-            error: number;
-        };
-        angular: {
-            total: number;
-            vectorized: number;
-            pending: number;
-            error: number;
-        };
-        spring_boot: {
-            total: number;
-            vectorized: number;
-            pending: number;
-            error: number;
-        };
+        nsdk?: { total: number };
+        angular?: { total: number };
+        spring_boot?: { total: number };
     };
 }
 
-export interface SearchResult {
-    id: string;
-    score: number;
-    metadata: any;
-}
-
-export interface SearchResponse {
-    query: string;
-    results: SearchResult[];
-    total_results: number;
+export interface VectorizeRepositoryRequest {
+    config_id: string;
+    repo_type: string;
+    branch: string;
 }
 
 @Injectable({
@@ -89,121 +74,100 @@ export class KnowledgeService {
 
     constructor(private http: HttpClient) { }
 
-    // Vectorización de repositorios
-    vectorizeRepository(request: VectorizeRepositoryRequest): Observable<any> {
-        return this.http.post(`${this.apiUrl}/vectorize/repository`, request);
-    }
-
-    vectorizeModule(request: VectorizeModuleRequest): Observable<any> {
-        return this.http.post(`${this.apiUrl}/vectorize/module`, request);
-    }
-
-    // Estadísticas y estado
-    getVectorizationStats(): Observable<VectorizationStats> {
-        return this.http.get<VectorizationStats>(`${this.apiUrl}/vectorize/stats`);
-    }
-
-    getBatchStatus(batchId: string): Observable<VectorizationBatch> {
-        return this.http.get<VectorizationBatch>(`${this.apiUrl}/vectorize/batch/${batchId}`);
-    }
-
-    cancelBatch(batchId: string): Observable<any> {
-        return this.http.post(`${this.apiUrl}/vectorize/batch/${batchId}/cancel`, {});
-    }
-
-    // Búsqueda de código
-    searchSimilarCode(request: SearchCodeRequest): Observable<SearchResponse> {
-        return this.http.post<SearchResponse>(`${this.apiUrl}/vectorize/search`, request);
-    }
-
-    // Búsqueda semántica avanzada
-    searchBySemanticQuery(query: string, limit: number = 10): Observable<SearchResponse> {
-        return this.searchSimilarCode({ query, limit });
-    }
-
-    // Búsqueda por tipo de archivo
-    searchByFileType(fileType: string, query: string, limit: number = 10): Observable<SearchResponse> {
-        const enhancedQuery = `${query} file_type:${fileType}`;
-        return this.searchSimilarCode({ query: enhancedQuery, limit });
-    }
-
-    // Búsqueda por módulo
-    searchByModule(moduleName: string, query: string, limit: number = 10): Observable<SearchResponse> {
-        const enhancedQuery = `${query} module:${moduleName}`;
-        return this.searchSimilarCode({ query: enhancedQuery, limit });
-    }
-
-    // Búsqueda por contenido específico
-    searchByContent(content: string, limit: number = 10): Observable<SearchResponse> {
-        return this.searchSimilarCode({ query: content, limit });
-    }
-
-    // Obtener archivos vectorizados recientemente
-    getRecentVectorizedFiles(limit: number = 20): Observable<any[]> {
-        // TODO: Implementar endpoint para archivos recientes
-        return this.http.get<any[]>(`${this.apiUrl}/vectorize/recent-files?limit=${limit}`);
-    }
-
-    // Obtener archivos por estado
-    getFilesByStatus(status: string, limit: number = 50): Observable<any[]> {
-        // TODO: Implementar endpoint para archivos por estado
-        return this.http.get<any[]>(`${this.apiUrl}/vectorize/files/status/${status}?limit=${limit}`);
-    }
-
-    // Obtener archivos por tipo
-    getFilesByType(fileType: string, limit: number = 50): Observable<any[]> {
-        // TODO: Implementar endpoint para archivos por tipo
-        return this.http.get<any[]>(`${this.apiUrl}/vectorize/files/type/${fileType}?limit=${limit}`);
-    }
-
-    // Obtener archivos por módulo
-    getFilesByModule(moduleName: string, limit: number = 50): Observable<any[]> {
-        // TODO: Implementar endpoint para archivos por módulo
-        return this.http.get<any[]>(`${this.apiUrl}/vectorize/files/module/${moduleName}?limit=${limit}`);
-    }
-
-    // Análisis de similitud entre archivos
-    analyzeFileSimilarity(fileId1: string, fileId2: string): Observable<any> {
-        // TODO: Implementar endpoint para análisis de similitud
-        return this.http.get<any>(`${this.apiUrl}/vectorize/similarity/${fileId1}/${fileId2}`);
-    }
-
-    // Obtener recomendaciones de archivos relacionados
-    getRelatedFiles(fileId: string, limit: number = 10): Observable<any[]> {
-        // TODO: Implementar endpoint para archivos relacionados
-        return this.http.get<any[]>(`${this.apiUrl}/vectorize/related/${fileId}?limit=${limit}`);
-    }
-
-    // Exportar resultados de búsqueda
-    exportSearchResults(searchResults: SearchResult[], format: 'json' | 'csv' | 'excel' = 'json'): Observable<any> {
-        // TODO: Implementar endpoint para exportación
-        return this.http.post(`${this.apiUrl}/vectorize/export`, {
-            results: searchResults,
-            format: format
+    /**
+     * Sube y procesa un documento PDF de NSDK
+     */
+    uploadDocument(filePath: string, documentName: string): Observable<DocumentUploadResponse> {
+        return this.http.post<DocumentUploadResponse>(`${this.apiUrl}/nsdk-documents/upload`, {
+            file_path: filePath,
+            document_name: documentName
         });
     }
 
-    // Limpiar vector store
-    clearVectorStore(): Observable<any> {
-        // TODO: Implementar endpoint para limpiar vector store
-        return this.http.post(`${this.apiUrl}/vectorize/clear`, {});
+    /**
+     * Obtiene el estado de procesamiento de un documento
+     */
+    getDocumentStatus(documentId: string): Observable<{ status: string, document: NSDKDocument }> {
+        return this.http.get<{ status: string, document: NSDKDocument }>(`${this.apiUrl}/nsdk-documents/${documentId}/status`);
     }
 
-    // Reindexar archivos existentes
-    reindexFiles(fileIds: string[]): Observable<any> {
-        // TODO: Implementar endpoint para reindexación
-        return this.http.post(`${this.apiUrl}/vectorize/reindex`, { file_ids: fileIds });
+    /**
+     * Obtiene todos los documentos NSDK procesados
+     */
+    getAllDocuments(): Observable<{ status: string, documents: NSDKDocument[] }> {
+        return this.http.get<{ status: string, documents: NSDKDocument[] }>(`${this.apiUrl}/nsdk-documents`);
     }
 
-    // Obtener métricas de rendimiento
-    getPerformanceMetrics(): Observable<any> {
-        // TODO: Implementar endpoint para métricas de rendimiento
-        return this.http.get<any>(`${this.apiUrl}/vectorize/metrics/performance`);
+    /**
+     * Consulta la documentación NSDK
+     */
+    queryDocumentation(query: string, context: string = ''): Observable<DocumentQueryResponse> {
+        return this.http.post<DocumentQueryResponse>(`${this.apiUrl}/nsdk-documents/query`, {
+            query: query,
+            context: context
+        });
     }
 
-    // Obtener métricas de calidad
-    getQualityMetrics(): Observable<any> {
-        // TODO: Implementar endpoint para métricas de calidad
-        return this.http.get<any>(`${this.apiUrl}/vectorize/metrics/quality`);
+    /**
+     * Obtiene estadísticas de la documentación NSDK
+     */
+    getDocumentationStats(): Observable<{ status: string, stats: DocumentStats }> {
+        return this.http.get<{ status: string, stats: DocumentStats }>(`${this.apiUrl}/nsdk-documents/stats`);
+    }
+
+    /**
+     * Prueba la indexación de documentos NSDK
+     */
+    testDocumentIndexing(): Observable<{ status: string, test_results: any }> {
+        return this.http.post<{ status: string, test_results: any }>(`${this.apiUrl}/nsdk-documents/test-indexing`, {});
+    }
+
+    /**
+     * Procesa un documento PDF existente en NSDK-DOCS
+     */
+    processExistingDocument(documentName: string): Observable<DocumentUploadResponse> {
+        return this.http.post<DocumentUploadResponse>(`${this.apiUrl}/nsdk-documents/process-existing`,
+            documentName,
+            {
+                headers: {
+                    'Content-Type': 'text/plain'
+                }
+            }
+        );
+    }
+
+    /**
+     * Obtiene la lista de documentos PDF disponibles en NSDK-DOCS
+     */
+    getAvailableDocuments(): Observable<{ status: string, documents: any[], total_count: number }> {
+        return this.http.get<{ status: string, documents: any[], total_count: number }>(`${this.apiUrl}/nsdk-documents/available`);
+    }
+
+    /**
+     * Vectoriza un repositorio
+     */
+    vectorizeRepository(request: VectorizeRepositoryRequest): Observable<any> {
+        return this.http.post<any>(`${this.apiUrl}/vectorize/repository`, request);
+    }
+
+    /**
+     * Obtiene el estado de un batch de vectorización
+     */
+    getBatchStatus(batchId: string): Observable<VectorizationBatch> {
+        return this.http.get<VectorizationBatch>(`${this.apiUrl}/vectorize/batch/${batchId}/status`);
+    }
+
+    /**
+     * Obtiene estadísticas de vectorización
+     */
+    getVectorizationStats(): Observable<VectorizationStats> {
+        return this.http.get<VectorizationStats>(`${this.apiUrl}/vectorize/embeddings/stats`);
+    }
+
+    /**
+     * Busca código similar
+     */
+    searchSimilarCode(request: SearchCodeRequest): Observable<{ results: any[] }> {
+        return this.http.post<{ results: any[] }>(`${this.apiUrl}/vectorize/search`, request);
     }
 }

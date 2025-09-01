@@ -1145,4 +1145,219 @@ async def test_semantic_search(
         
     except Exception as e:
         logger.error(f"Error en búsqueda de prueba: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en búsqueda: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error en búsqueda: {str(e)}")
+
+
+# ===== ENDPOINTS PARA SISTEMA DE DOCUMENTACIÓN NSDK =====
+
+@app.post("/nsdk-documents/upload", tags=["NSDK Documentation"])
+async def upload_nsdk_document(
+    file_path: str = Body(..., description="Ruta del archivo PDF"),
+    document_name: str = Body(..., description="Nombre del documento"),
+    db: Session = Depends(get_db)
+):
+    """Sube y procesa un documento PDF de NSDK"""
+    try:
+        from .application.services.nsdk_pdf_processor import NSDKPDFProcessor
+        
+        processor = NSDKPDFProcessor(db)
+        document_id = await processor.process_nsdk_document(file_path, document_name)
+        
+        return {
+            "status": "success",
+            "message": "Documento procesado exitosamente",
+            "document_id": document_id,
+            "document_name": document_name
+        }
+        
+    except Exception as e:
+        logger.error(f"Error procesando documento NSDK: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando documento: {str(e)}")
+
+
+@app.post("/nsdk-documents/process-existing", tags=["NSDK Documentation"])
+async def process_existing_nsdk_document(
+    document_name: str = Body(..., description="Nombre del documento a procesar"),
+    db: Session = Depends(get_db)
+):
+    """Procesa un documento PDF existente en la carpeta NSDK-DOCS"""
+    try:
+        import os
+        from .application.services.nsdk_pdf_processor import NSDKPDFProcessor
+        
+        # Buscar el archivo en la carpeta NSDK-DOCS
+        nsdk_docs_path = "../NSDK-DOCS"
+        if not os.path.exists(nsdk_docs_path):
+            raise HTTPException(status_code=404, detail="Carpeta NSDK-DOCS no encontrada")
+        
+        # Buscar archivo PDF
+        pdf_file = None
+        for file in os.listdir(nsdk_docs_path):
+            if file.lower().endswith('.pdf') and document_name.lower() in file.lower():
+                pdf_file = os.path.join(nsdk_docs_path, file)
+                break
+        
+        if not pdf_file:
+            raise HTTPException(status_code=404, detail=f"Archivo PDF con nombre '{document_name}' no encontrado")
+        
+        processor = NSDKPDFProcessor(db)
+        document_id = await processor.process_nsdk_document(pdf_file, document_name)
+        
+        return {
+            "status": "success",
+            "message": "Documento procesado exitosamente",
+            "document_id": document_id,
+            "document_name": document_name,
+            "file_path": pdf_file
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error procesando documento NSDK existente: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando documento: {str(e)}")
+
+
+@app.get("/nsdk-documents/{document_id}/status", tags=["NSDK Documentation"])
+async def get_document_status(document_id: str, db: Session = Depends(get_db)):
+    """Obtiene el estado de procesamiento de un documento"""
+    try:
+        from .application.services.nsdk_pdf_processor import NSDKPDFProcessor
+        
+        processor = NSDKPDFProcessor(db)
+        status = await processor.get_document_status(document_id)
+        
+        if status:
+            return {
+                "status": "success",
+                "document": status
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Documento no encontrado")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error obteniendo estado del documento: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estado: {str(e)}")
+
+
+@app.get("/nsdk-documents", tags=["NSDK Documentation"])
+async def get_all_documents(db: Session = Depends(get_db)):
+    """Obtiene todos los documentos NSDK procesados"""
+    try:
+        from .infrastructure.repositories.nsdk_document_repository import NSDKDocumentRepository
+        
+        repo = NSDKDocumentRepository(db)
+        documents = await repo.get_all()
+        
+        return {
+            "status": "success",
+            "documents": [doc.to_dict() for doc in documents]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo documentos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo documentos: {str(e)}")
+
+
+@app.post("/nsdk-documents/query", tags=["NSDK Documentation"])
+async def query_nsdk_documentation(
+    query: str = Body(..., description="Consulta sobre documentación NSDK"),
+    context: str = Body("", description="Contexto adicional"),
+    db: Session = Depends(get_db)
+):
+    """Consulta la documentación NSDK"""
+    try:
+        from .application.services.nsdk_query_service import NSDKQueryService
+        
+        query_service = NSDKQueryService(db)
+        result = await query_service.query_documentation(query, context)
+        
+        return {
+            "status": "success",
+            "query": query,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error consultando documentación: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error consultando documentación: {str(e)}")
+
+
+@app.get("/nsdk-documents/stats", tags=["NSDK Documentation"])
+async def get_documentation_stats(db: Session = Depends(get_db)):
+    """Obtiene estadísticas de la documentación NSDK"""
+    try:
+        from .application.services.nsdk_query_service import NSDKQueryService
+        
+        query_service = NSDKQueryService(db)
+        stats = await query_service.get_documentation_stats()
+        
+        return {
+            "status": "success",
+            "stats": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo estadísticas: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estadísticas: {str(e)}")
+
+
+@app.post("/nsdk-documents/test-indexing", tags=["NSDK Documentation"])
+async def test_document_indexing(db: Session = Depends(get_db)):
+    """Prueba la indexación de documentos NSDK"""
+    try:
+        from .application.services.nsdk_query_service import NSDKQueryService
+        
+        query_service = NSDKQueryService(db)
+        results = await query_service.test_document_indexing()
+        
+        return {
+            "status": "success",
+            "test_results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error probando indexación: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error probando indexación: {str(e)}")
+
+
+@app.get("/nsdk-documents/available", tags=["NSDK Documentation"])
+async def get_available_nsdk_documents():
+    """Obtiene la lista de documentos PDF disponibles en NSDK-DOCS"""
+    try:
+        import os
+        
+        nsdk_docs_path = "../NSDK-DOCS"
+        if not os.path.exists(nsdk_docs_path):
+            return {
+                "status": "success",
+                "documents": [],
+                "message": "Carpeta NSDK-DOCS no encontrada"
+            }
+        
+        pdf_files = []
+        for file in os.listdir(nsdk_docs_path):
+            if file.lower().endswith('.pdf'):
+                file_path = os.path.join(nsdk_docs_path, file)
+                file_size = os.path.getsize(file_path)
+                pdf_files.append({
+                    "name": file,
+                    "display_name": file.replace('.pdf', '').replace('_', ' ').title(),
+                    "size_mb": round(file_size / (1024 * 1024), 2),
+                    "path": file_path
+                })
+        
+        # Ordenar por nombre
+        pdf_files.sort(key=lambda x: x['name'])
+        
+        return {
+            "status": "success",
+            "documents": pdf_files,
+            "total_count": len(pdf_files)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo documentos disponibles: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo documentos: {str(e)}") 

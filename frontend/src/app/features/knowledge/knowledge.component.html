@@ -6,9 +6,13 @@
         <mat-icon>{{ isVectorizing ? 'sync' : 'upload' }}</mat-icon>
         {{ isVectorizing ? 'Actualizando y Vectorizando...' : 'Vectorizar Todos' }}
       </button>
-      <button mat-raised-button color="accent" (click)="openDocumentUpload()">
+      <button mat-raised-button color="accent" (click)="openDocumentSelector()">
         <mat-icon>library_add</mat-icon>
-        Subir Documentación
+        Procesar Documentación NSDK
+      </button>
+      <button mat-stroked-button color="accent" (click)="openDocumentUpload()">
+        <mat-icon>cloud_upload</mat-icon>
+        Subir PDF
       </button>
     </div>
   </div>
