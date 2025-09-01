@@ -15,7 +15,7 @@ class LLMServiceImpl(LLMService):
         """Inicializa el servicio LLM con la configuración"""
         try:
             self.config = config
-            self.provider = config.provider
+            self.provider = config.provider.value  # Usar el valor del enum
             self.api_key = config.api_key
             self.base_url = config.base_url
             return True
@@ -164,84 +164,172 @@ class LLMServiceImpl(LLMService):
     async def chat_completion(self, messages: List[Dict[str, str]], 
                             system_prompt: Optional[str] = None) -> str:
         """Realiza una completación de chat genérica"""
-        # TODO: Implementar chat real con proveedores LLM
-        # Por ahora, devolver una respuesta JSON válida temporal
-        return '''{
-    "analysis_summary": "Análisis automático de pantalla .SCR - Pantalla de alta de usuarios con campos de formulario y botones de acción",
+        try:
+            if not self.config:
+                raise Exception("LLM service no inicializado con configuración")
+            
+            if self.provider == 'openai':
+                return await self._openai_chat_completion(messages, system_prompt)
+            elif self.provider == 'ollama':
+                return await self._ollama_chat_completion(messages, system_prompt)
+            elif self.provider == 'mistral':
+                return await self._mistral_chat_completion(messages, system_prompt)
+            else:
+                raise Exception(f"Proveedor LLM no soportado: {self.provider}")
+                
+        except Exception as e:
+            print(f"Error en chat completion: {e}")
+            # Fallback a respuesta temporal si hay error
+            return '''{
+    "analysis_summary": "Error en análisis automático - Fallback temporal",
     "file_type": "screen",
-    "complexity": "medium",
-    "estimated_hours": "8",
-    "frontend": {
-        "screen_type": "form",
-        "title": "Alta de Usuarios",
-        "fields": [
-            {
-                "name": "nombre",
-                "type": "text",
-                "required": true,
-                "validation": "Campo obligatorio"
-            },
-            {
-                "name": "email",
-                "type": "text",
-                "required": true,
-                "validation": "Formato de email válido"
-            }
-        ],
-        "buttons": [
-            {
-                "name": "guardar",
-                "action": "save",
-                "description": "Guardar usuario"
-            },
-            {
-                "name": "cancelar",
-                "action": "cancel",
-                "description": "Cancelar operación"
-            }
-        ],
-        "angular_components": ["MatFormField", "MatButton", "MatInput"],
-        "routing": "/usuarios/alta",
-        "dependencies": ["@angular/forms", "@angular/material"]
-    },
-    "backend": {
-        "entity_name": "Usuario",
-        "database_table": "usuarios",
-        "fields": [
-            {
-                "name": "nombre",
-                "java_type": "String",
-                "jpa_annotations": ["@Column", "@NotNull"],
-                "database_type": "VARCHAR(255)"
-            },
-            {
-                "name": "email",
-                "java_type": "String",
-                "jpa_annotations": ["@Column", "@NotNull", "@Email"],
-                "database_type": "VARCHAR(255)"
-            }
-        ],
-        "endpoints": [
-            {
-                "method": "POST",
-                "path": "/api/usuarios",
-                "description": "Crear nuevo usuario"
-            }
-        ],
-        "business_logic": "Validación de datos de usuario y persistencia en base de datos",
-        "spring_annotations": ["@RestController", "@Service", "@Repository"]
-    },
-    "migration_notes": [
-        "Implementar validaciones de frontend con Angular Reactive Forms",
-        "Configurar CORS para comunicación frontend-backend",
-        "Implementar manejo de errores en ambos lados"
-    ],
-    "potential_issues": [
-        "Verificar compatibilidad de tipos de datos entre NSDK y Java",
-        "Considerar migración de reglas de negocio existentes",
-        "Validar permisos y seguridad en la nueva implementación"
-    ]
+    "complexity": "unknown",
+    "estimated_hours": "0",
+    "frontend": {},
+    "backend": {},
+    "migration_notes": ["Error en análisis automático"],
+    "potential_issues": ["Error en análisis automático"]
 }'''
+    
+    async def _openai_chat_completion(self, messages: List[Dict[str, str]], 
+                                    system_prompt: Optional[str] = None) -> str:
+        """Realiza completación de chat usando OpenAI"""
+        try:
+            # Preparar mensajes para OpenAI
+            openai_messages = []
+            if system_prompt:
+                openai_messages.append({"role": "system", "content": system_prompt})
+            openai_messages.extend(messages)
+            
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': self.config.model_name if hasattr(self.config, 'model_name') else 'gpt-4',
+                'messages': openai_messages,
+                'max_tokens': self.config.max_tokens if hasattr(self.config, 'max_tokens') else 4096,
+                'temperature': self.config.temperature if hasattr(self.config, 'temperature') else 0.7
+            }
+            
+            # Log de entrada
+            print("=== OPENAI REQUEST ===")
+            print(f"Model: {payload['model']}")
+            print(f"Max tokens: {payload['max_tokens']}")
+            print(f"Temperature: {payload['temperature']}")
+            print("Messages:")
+            for i, msg in enumerate(openai_messages):
+                print(f"  {i+1}. Role: {msg['role']}")
+                print(f"     Content: {msg['content'][:200]}{'...' if len(msg['content']) > 200 else ''}")
+            print("=====================")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    'https://api.openai.com/v1/chat/completions',
+                    headers=headers,
+                    json=payload,
+                    timeout=60
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    content = data['choices'][0]['message']['content']
+                    
+                    # Log de salida
+                    print("=== OPENAI RESPONSE ===")
+                    print(f"Status: {response.status_code}")
+                    print(f"Usage: {data.get('usage', 'N/A')}")
+                    print(f"Content length: {len(content)}")
+                    print(f"Content: {content[:500]}{'...' if len(content) > 500 else ''}")
+                    print("======================")
+                    
+                    return content
+                else:
+                    print(f"=== OPENAI ERROR ===")
+                    print(f"Status: {response.status_code}")
+                    print(f"Response: {response.text}")
+                    print("===================")
+                    raise Exception(f"OpenAI API error: {response.text}")
+                    
+        except Exception as e:
+            print(f"Error OpenAI chat completion: {e}")
+            raise
+    
+    async def _ollama_chat_completion(self, messages: List[Dict[str, str]], 
+                                    system_prompt: Optional[str] = None) -> str:
+        """Realiza completación de chat usando Ollama"""
+        try:
+            base_url = self.base_url or 'http://localhost:11434'
+            
+            # Preparar mensajes para Ollama
+            ollama_messages = []
+            if system_prompt:
+                ollama_messages.append({"role": "system", "content": system_prompt})
+            ollama_messages.extend(messages)
+            
+            payload = {
+                'model': 'llama2',
+                'messages': ollama_messages,
+                'stream': False
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f'{base_url}/api/chat',
+                    json=payload,
+                    timeout=60
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return data['message']['content']
+                else:
+                    raise Exception(f"Ollama API error: {response.text}")
+                    
+        except Exception as e:
+            print(f"Error Ollama chat completion: {e}")
+            raise
+    
+    async def _mistral_chat_completion(self, messages: List[Dict[str, str]], 
+                                     system_prompt: Optional[str] = None) -> str:
+        """Realiza completación de chat usando Mistral"""
+        try:
+            # Preparar mensajes para Mistral
+            mistral_messages = []
+            if system_prompt:
+                mistral_messages.append({"role": "system", "content": system_prompt})
+            mistral_messages.extend(messages)
+            
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': 'mistral-large-latest',
+                'messages': mistral_messages,
+                'max_tokens': 4096,
+                'temperature': 0.7
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    'https://api.mistral.ai/v1/chat/completions',
+                    headers=headers,
+                    json=payload,
+                    timeout=60
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return data['choices'][0]['message']['content']
+                else:
+                    raise Exception(f"Mistral API error: {response.text}")
+                    
+        except Exception as e:
+            print(f"Error Mistral chat completion: {e}")
+            raise
     
     @staticmethod
     def test_connection(config: dict) -> (bool, str):

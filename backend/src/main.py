@@ -267,6 +267,44 @@ from .infrastructure.services.llm_service_impl import LLMServiceImpl
 # Instanciar servicios
 vector_store_service = VectorStoreServiceImpl()
 llm_service = LLMServiceImpl()
+
+# Función para inicializar LLM con configuración de BD
+async def initialize_llm_service():
+    """Inicializa el servicio LLM con la configuración activa de la base de datos"""
+    try:
+        # Obtener configuración activa
+        active_config = await config_repo.find_active()
+        if active_config and active_config.config_data.get('llmConfig'):
+            llm_config_data = active_config.config_data['llmConfig']
+            
+            # Crear objeto LLMConfig
+            from .domain.entities.configuration import LLMConfig, LLMProvider
+            provider_map = {
+                'openai': LLMProvider.OPENAI,
+                'ollama': LLMProvider.OLLAMA,
+                'mistral': LLMProvider.MISTRAL
+            }
+            
+            llm_config = LLMConfig(
+                provider=provider_map.get(llm_config_data.get('provider', 'openai'), LLMProvider.OPENAI),
+                api_key=llm_config_data.get('apiKey'),
+                base_url=llm_config_data.get('baseUrl'),
+                model_name=llm_config_data.get('modelName', 'gpt-4'),
+                max_tokens=llm_config_data.get('maxTokens', 4096),
+                temperature=llm_config_data.get('temperature', 0.7)
+            )
+            
+            # Inicializar LLM service
+            await llm_service.initialize(llm_config)
+            logger.info(f"LLM service inicializado con proveedor: {llm_config.provider}")
+            return True
+        else:
+            logger.warning("No se encontró configuración LLM activa en la base de datos")
+            return False
+    except Exception as e:
+        logger.error(f"Error inicializando LLM service: {str(e)}")
+        return False
+
 unified_vectorization_service = UnifiedVectorizationService(vector_store_service, llm_service, repo_manager, config_repo)
 vectorization_use_case = VectorizationUseCase(unified_vectorization_service)
 
@@ -786,6 +824,9 @@ async def analyze_file_with_ai(
         analysis_repo.update(file_analysis)
         
         logger.info(f"Iniciando análisis IA para {file_analysis.file_name}")
+        
+        # Inicializar LLM service con configuración de BD
+        await initialize_llm_service()
         
         # Importar y usar el servicio de análisis IA
         from .application.services.ai_analysis_service import AIAnalysisService

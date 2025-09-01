@@ -41,15 +41,20 @@ class AIAnalysisService:
             analysis_prompt = self._create_analysis_prompt(
                 file_name, file_content, similar_code_context
             )
+            logger.info(f"Prompt creado: {len(analysis_prompt)} caracteres")
             
             # 3. Enviar a la IA para análisis
+            logger.info("Enviando a OpenAI...")
             ai_response = await self.llm_service.chat_completion([
                 {"role": "system", "content": self._get_system_prompt()},
                 {"role": "user", "content": analysis_prompt}
             ])
+            logger.info(f"Respuesta de OpenAI recibida: {len(ai_response)} caracteres")
             
             # 4. Procesar respuesta de la IA
+            logger.info("Procesando respuesta...")
             analysis_result = self._process_ai_response(ai_response, file_name)
+            logger.info(f"Análisis procesado: {list(analysis_result.keys())}")
             
             logger.info(f"Análisis IA completado para {file_name}")
             return analysis_result
@@ -134,6 +139,18 @@ Analiza este fichero .SCR y proporciona un análisis detallado para su migració
 - **Frontend:** Angular con Angular Material
 - **Backend:** Java Spring Boot con JPA/Hibernate
 
+**IMPORTANTE:** Presta especial atención a:
+1. **Menú Superior:** Identifica el menú de navegación principal en la parte superior de la pantalla, opciones del menú, submenús, etc.
+2. **Tablas:** Identifica TODAS las tablas, sus columnas, tipos de datos, y funcionalidades (ordenamiento, filtrado, paginación)
+3. **Navegaciones:** Identifica todas las navegaciones entre pantallas, botones que cambian de pantalla, enlaces, etc.
+4. **Flujo de navegación:** Describe cómo el usuario navega por la aplicación
+5. **Parámetros de navegación:** Qué datos se pasan entre pantallas
+6. **Condiciones de navegación:** Si hay validaciones antes de navegar
+7. **Campos, validaciones, botones y lógica de negocio**
+
+**DETECCIÓN DE MENÚS:** Busca patrones como: MENU, MENUBAR, NAVBAR, HEADER, TOP_MENU, MAIN_MENU, etc.
+**DETECCIÓN DE TABLAS:** Busca patrones como: TABLE, GRID, LIST, DATAGRID, COLUMN, HEADER, etc.
+
 ## ESTRUCTURA DE RESPUESTA REQUERIDA (JSON):
 ```json
 {{
@@ -158,9 +175,58 @@ Analiza este fichero .SCR y proporciona un análisis detallado para su migració
                 "description": "descripción de la acción"
             }}
         ],
+        "tables": [
+            {{
+                "name": "nombre_tabla",
+                "description": "descripción de la tabla",
+                "columns": [
+                    {{
+                        "name": "nombre_columna",
+                        "type": "text|number|date|boolean|etc",
+                        "width": "ancho de la columna",
+                        "sortable": true|false,
+                        "filterable": true|false,
+                        "description": "descripción de la columna"
+                    }}
+                ],
+                "actions": ["editar", "eliminar", "ver_detalle", "etc"],
+                "pagination": true|false,
+                "search": true|false
+            }}
+        ],
+        "navigations": [
+            {{
+                "trigger": "botón|enlace|evento",
+                "destination": "nombre_pantalla_destino",
+                "condition": "condición de navegación (si existe)",
+                "parameters": ["parametros que se pasan"],
+                "description": "descripción de la navegación"
+            }}
+        ],
         "angular_components": ["MatFormField", "MatButton", "MatTable", "etc"],
         "routing": "ruta sugerida para Angular",
-        "dependencies": ["@angular/forms", "@angular/material", "etc"]
+        "dependencies": ["@angular/forms", "@angular/material", "etc"],
+        "navigation_flow": "descripción del flujo de navegación completo",
+        "top_menu": {{
+            "menu_items": [
+                {{
+                    "name": "nombre_opcion_menu",
+                    "label": "etiqueta visible",
+                    "action": "navegación|submenu|acción",
+                    "destination": "pantalla_destino",
+                    "submenu": [
+                        {{
+                            "name": "submenu_item",
+                            "label": "etiqueta submenu",
+                            "action": "navegación|acción",
+                            "destination": "pantalla_destino"
+                        }}
+                    ]
+                }}
+            ],
+            "position": "top|header|navigation_bar",
+            "style": "horizontal|vertical|dropdown"
+        }}
     }},
     "backend": {{
         "entity_name": "nombre de la entidad JPA",
@@ -178,6 +244,20 @@ Analiza este fichero .SCR y proporciona un análisis detallado para su migració
                 "method": "GET|POST|PUT|DELETE",
                 "path": "/api/ruta",
                 "description": "descripción del endpoint"
+            }}
+        ],
+        "related_tables": [
+            {{
+                "table_name": "nombre_tabla_relacionada",
+                "relationship": "one_to_many|many_to_one|many_to_many",
+                "description": "descripción de la relación",
+                "columns": [
+                    {{
+                        "name": "nombre_columna",
+                        "type": "String|Integer|Date|etc",
+                        "description": "descripción de la columna"
+                    }}
+                ]
             }}
         ],
         "business_logic": "descripción de la lógica de negocio identificada",
@@ -210,7 +290,20 @@ Eres un experto en migración de aplicaciones legacy a tecnologías modernas, es
 Tu tarea es analizar ficheros .SCR y proporcionar análisis detallados para su migración.
 Siempre responde en formato JSON válido y en español.
 Sé preciso en las estimaciones de complejidad y horas.
-Identifica todos los campos, validaciones, botones y lógica de negocio.
+
+**ANÁLISIS CRÍTICO REQUERIDO:**
+1. **Menú Superior:** Identifica el menú principal de navegación en la parte superior, opciones, submenús, estructura jerárquica
+2. **Tablas:** Identifica TODAS las tablas, sus columnas, tipos de datos, y funcionalidades
+3. **Navegaciones:** Identifica TODAS las navegaciones entre pantallas, botones de navegación, enlaces, etc.
+4. **Flujo de usuario:** Describe cómo el usuario navega por la aplicación
+5. **Parámetros de navegación:** Qué datos se pasan entre pantallas
+6. **Condiciones de navegación:** Validaciones antes de navegar
+7. **Campos, validaciones, botones y lógica de negocio**
+
+**PATRONES A BUSCAR:**
+- Menús: MENU, MENUBAR, NAVBAR, HEADER, TOP_MENU, MAIN_MENU, SUBMENU, etc.
+- Navegación: CALL, GOTO, NAVIGATE, TRANSFER, etc.
+- Tablas: TABLE, GRID, LIST, DATAGRID, COLUMN, HEADER, ROW, etc.
 """
     
     def _process_ai_response(self, ai_response: str, file_name: str) -> Dict[str, Any]:
@@ -218,8 +311,12 @@ Identifica todos los campos, validaciones, botones y lógica de negocio.
         try:
             import json
             
+            logger.info(f"Intentando parsear JSON de {len(ai_response)} caracteres")
+            logger.info(f"Primeros 200 caracteres: {ai_response[:200]}")
+            
             # Intentar parsear como JSON
             analysis_data = json.loads(ai_response)
+            logger.info(f"JSON parseado exitosamente. Claves: {list(analysis_data.keys())}")
             
             # Agregar metadatos adicionales
             analysis_data["file_name"] = file_name
@@ -230,6 +327,7 @@ Identifica todos los campos, validaciones, botones y lógica de negocio.
             
         except json.JSONDecodeError as e:
             logger.error(f"Error parseando respuesta JSON de IA: {str(e)}")
+            logger.error(f"Respuesta completa: {ai_response}")
             # Crear respuesta de fallback
             return {
                 "file_name": file_name,
