@@ -1016,7 +1016,31 @@ export class ModulesComponent implements OnInit {
   }
 
   viewCode(node: FlatNode) {
-    console.log(`Viendo código de: ${node.name}`);
+    if (!node.is_file) return;
+    const repoName = 'nsdk-sources';
+    // Intentar por id si existe; si no, por path
+    const options: any = {};
+    if (node.id) options.fileId = node.id;
+    else if (node.path) options.filePath = node.path;
+
+    this.modulesService.getFileContent(repoName, options).subscribe({
+      next: (resp: any) => {
+        this.dialog.open(FileViewerModalComponent, {
+          width: '90vw',
+          height: '90vh',
+          data: {
+            node,
+            content: resp.content_text || '',
+            path: resp.path,
+            size: resp.size_bytes
+          }
+        });
+      },
+      error: (err: any) => {
+        console.error('Error obteniendo contenido del fichero', err);
+        this.snackBar.open('No se pudo cargar el contenido del fichero', 'Cerrar', { duration: 4000 });
+      }
+    });
   }
 
   exportAnalysis(node: FlatNode) {
@@ -1413,4 +1437,44 @@ export class AnalysisModalComponent {
   exportAnalysis() {
     console.log('Exportando análisis...');
   }
+}
+
+@Component({
+  selector: 'app-file-viewer-modal',
+  standalone: true,
+  imports: [CommonModule, MatCardModule, MatButtonModule, MatIconModule, MatDividerModule],
+  template: `
+    <div class="file-viewer-modal">
+      <div class="modal-header">
+        <h2>{{ data.node.name }}</h2>
+        <button mat-icon-button (click)="dialogRef.close()">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+      <div class="file-meta">
+        <span>{{ data.path }}</span>
+        <span>{{ data.size }} bytes</span>
+      </div>
+      <div class="file-content">
+        <pre><code>{{ data.content }}</code></pre>
+      </div>
+      <div class="modal-actions">
+        <button mat-raised-button (click)="dialogRef.close()">Cerrar</button>
+      </div>
+    </div>
+  `,
+  styles: [`
+    .file-viewer-modal { height: 100%; display: flex; flex-direction: column; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #eee; }
+    .file-meta { display: flex; gap: 12px; padding: 8px 16px; color: #666; font-size: 12px; }
+    .file-content { flex: 1; overflow: auto; padding: 16px; background: #0b1020; color: #e6e6e6; }
+    pre { margin: 0; white-space: pre; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid #eee; }
+  `]
+})
+export class FileViewerModalComponent {
+  constructor(
+    public dialogRef: MatDialogRef<FileViewerModalComponent>,
+    @Inject(MAT_DIALOG_DATA) public data: any
+  ) { }
 }

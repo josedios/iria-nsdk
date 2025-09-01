@@ -277,4 +277,17 @@ export class ModulesService {
     const params = forceResync ? '?force_resync=true' : '';
     return this.http.post<SyncResponse>(`${this.apiUrl}/repositories/${repoName}/sync-analysis${params}`, {});
   }
+
+  /**
+   * Obtiene el contenido de un fichero por id de análisis o por path
+   */
+  getFileContent(repoName: string, options: { fileId?: string; filePath?: string }): Observable<{ repository: string; path: string; size_bytes: number; content_text: string; }> {
+    const params = new URLSearchParams();
+    if (options.fileId) params.append('file_id', options.fileId);
+    if (options.filePath) params.append('file_path', options.filePath);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.http.get<{ repository: string; path: string; size_bytes: number; content_text: string; }>(
+      `${this.apiUrl}/repositories/${repoName}/file-content${query}`
+    );
+  }
 }

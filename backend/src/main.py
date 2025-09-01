@@ -13,6 +13,7 @@ from .application.use_cases.test_connections_use_case import TestConnectionsUseC
 from .infrastructure.services.repository_manager_service import RepositoryManagerService
 from .infrastructure.services.nsdk_analysis_sync_service import NSDKAnalysisSyncService
 from .infrastructure.repositories.nsdk_file_analysis_repository import NSDKFileAnalysisRepository
+from pathlib import Path
 
 # Configurar logging
 logging.basicConfig(
@@ -594,6 +595,70 @@ def get_repository_analysis_status(
     except Exception as e:
         logger.error(f"Error obteniendo estado de análisis para {repo_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error obteniendo estado: {str(e)}")
+
+@app.get("/repositories/{repo_name}/file-content", tags=["Archivos"])
+def get_file_content(
+    repo_name: str,
+    file_id: Optional[str] = None,
+    file_path: Optional[str] = None,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository)
+):
+    """Devuelve el contenido de un fichero del repositorio, por id de análisis o por path absoluto.
+    Si se proporciona file_id, se obtiene el path desde la BD. Si se proporciona file_path, se usa directamente.
+    """
+    try:
+        # Determinar ruta del repositorio y del fichero
+        repo_path = repo_manager.get_repository_path(repo_name)
+        if not repo_path:
+            raise HTTPException(status_code=404, detail=f"Repositorio {repo_name} no encontrado")
+
+        resolved_repo = Path(repo_path).resolve()
+
+        target_path: Optional[Path] = None
+
+        if file_id:
+            analysis = analysis_repo.get_by_id(file_id)
+            if not analysis:
+                raise HTTPException(status_code=404, detail=f"Archivo con id {file_id} no encontrado en BD")
+            candidate = Path(analysis.file_path)
+            target_path = candidate.resolve()
+        elif file_path:
+            candidate = Path(file_path)
+            target_path = candidate.resolve()
+        else:
+            raise HTTPException(status_code=400, detail="Debe proporcionar file_id o file_path")
+
+        # Seguridad: asegurar que el fichero está dentro del repo
+        if not str(target_path).startswith(str(resolved_repo)):
+            # Intentar resolver como ruta relativa al repo
+            candidate_rel = (resolved_repo / target_path.name).resolve()
+            if not str(candidate_rel).startswith(str(resolved_repo)):
+                raise HTTPException(status_code=400, detail="Ruta fuera del repositorio")
+            target_path = candidate_rel
+
+        if not target_path.exists() or not target_path.is_file():
+            raise HTTPException(status_code=404, detail="Fichero no encontrado")
+
+        # Leer contenido como texto (UTF-8), ignorando errores
+        try:
+            content_text = target_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            # Si no se puede como texto, devolver vacío y tamaño
+            content_text = ""
+
+        size_bytes = target_path.stat().st_size
+
+        return {
+            "repository": repo_name,
+            "path": str(target_path),
+            "size_bytes": size_bytes,
+            "content_text": content_text,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error leyendo contenido de fichero en {repo_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error leyendo fichero: {str(e)}")
 
 @app.get("/repositories/{repo_name}/analysis", tags=["Análisis NSDK"])
 def get_repository_analysis(
