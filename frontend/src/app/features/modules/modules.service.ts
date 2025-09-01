@@ -37,6 +37,7 @@ export interface RepositoryTreeNode {
   fields?: string[];
   button_count?: number;
   buttons?: string[];
+  expandable?: boolean;
 }
 
 export interface RepositoryTreeResponse {
@@ -185,6 +186,30 @@ export class ModulesService {
   }
 
   /**
+   * Obtiene la estructura de árbol completa de un repositorio
+   */
+  getRepositoryTree(repoName: string): Observable<RepositoryTreeResponse> {
+    return this.http.get<RepositoryTreeResponse>(`${this.apiUrl}/repository-tree/${repoName}`);
+  }
+
+  /**
+   * Obtiene solo un directorio específico para carga lazy
+   */
+  getDirectoryContents(repoName: string, directoryId: string): Observable<RepositoryTreeNode[]> {
+    return this.http.get<any>(`${this.apiUrl}/repository-tree/${repoName}/directory/${directoryId}`)
+      .pipe(
+        map(response => response.children || [])
+      );
+  }
+
+  /**
+   * Construye la estructura de directorios en BD para un repositorio
+   */
+  buildRepositoryTree(repoName: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/repository-tree/${repoName}/build`, {});
+  }
+
+  /**
    * Inicia la vectorización de un repositorio
    */
   vectorizeRepository(repoUrl: string, branch: string = 'main', username?: string, token?: string): Observable<any> {
@@ -201,38 +226,6 @@ export class ModulesService {
    */
   getVectorizationStats(): Observable<any> {
     return this.http.get(`${this.apiUrl}/vectorize/stats`);
-  }
-
-  /**
-   * Obtiene la estructura de árbol completa de un repositorio
-   */
-  getRepositoryTree(repoName: string): Observable<RepositoryTreeResponse> {
-    return this.http.get<RepositoryTreeResponse>(`${this.apiUrl}/repository-tree/${repoName}`);
-  }
-
-  /**
- * Obtiene solo un directorio específico para carga lazy
- */
-  getDirectoryContents(repoName: string, directoryId: string): Observable<RepositoryTreeNode[]> {
-    return this.http.get<any>(`${this.apiUrl}/repository-tree/${repoName}/directory/${directoryId}`)
-      .pipe(
-        map(response => response.children || [])
-      );
-  }
-
-  /**
-   * Construye la estructura de directorios en BD para un repositorio
-   */
-  buildRepositoryTree(repoName: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/repository-tree/${repoName}/build`, {});
-  }
-
-  /**
-   * Sincroniza el análisis de archivos NSDK de un repositorio con la base de datos
-   */
-  syncRepositoryAnalysis(repoName: string, forceResync: boolean = false): Observable<SyncResponse> {
-    const params = forceResync ? '?force_resync=true' : '';
-    return this.http.post<SyncResponse>(`${this.apiUrl}/repositories/${repoName}/sync-analysis${params}`, {});
   }
 
   /**
@@ -275,5 +268,13 @@ export class ModulesService {
    */
   cleanupOrphanedAnalyses(repoName: string): Observable<any> {
     return this.http.post(`${this.apiUrl}/repositories/${repoName}/cleanup-orphaned`, {});
+  }
+
+  /**
+   * Sincroniza el análisis de archivos NSDK de un repositorio
+   */
+  syncRepositoryAnalysis(repoName: string, forceResync: boolean = false): Observable<SyncResponse> {
+    const params = forceResync ? '?force_resync=true' : '';
+    return this.http.post<SyncResponse>(`${this.apiUrl}/repositories/${repoName}/sync-analysis${params}`, {});
   }
 }

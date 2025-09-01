@@ -345,7 +345,7 @@ export class DynamicDataSource extends DataSource<FlatNode> {
    */
   private convertToFlatNodes(treeNode: RepositoryTreeNode[], level: number): FlatNode[] {
     return treeNode.map(child => ({
-      expandable: child.is_dir && (((child.dir_count || 0) + (child.file_count || 0)) > 0),
+      expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
       name: child.name,
       type: child.type,
       status: 'analyzed',
@@ -500,7 +500,7 @@ export class ModulesComponent implements OnInit {
     this.errorMessage = '';
 
     this.modulesService.getRepositoryTree('nsdk-sources').subscribe({
-      next: (response) => {
+      next: (response: any) => {
         console.log('=== RESPUESTA COMPLETA DEL BACKEND ===');
         console.log('Response completo:', response);
         console.log('Response.children:', response.children);
@@ -519,7 +519,7 @@ export class ModulesComponent implements OnInit {
         // Opcionalmente, cargar análisis en segundo plano para estadísticas
         this.loadAnalysisInBackground();
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Error cargando raíz del repositorio:', error);
         this.errorMessage = 'Error al cargar la estructura del repositorio';
         this.isLoading = false;
@@ -532,7 +532,7 @@ export class ModulesComponent implements OnInit {
    */
   convertTreeToFlatNodes(treeNode: RepositoryTreeNode[]): FlatNode[] {
     return treeNode.map(child => ({
-      expandable: child.is_dir && (((child.dir_count || 0) + (child.file_count || 0)) > 0),
+      expandable: child.is_dir && (child.expandable === true || (((child.dir_count || 0) + (child.file_count || 0)) > 0)),
       name: child.name,
       type: child.type,
       status: 'analyzed',
@@ -565,11 +565,11 @@ export class ModulesComponent implements OnInit {
  */
   loadAnalysisInBackground() {
     this.modulesService.getRepositoryAnalysisStatus('nsdk-sources').subscribe({
-      next: (status) => {
+      next: (status: any) => {
         this.analysisStatus = status;
         console.log('Estado del análisis cargado en segundo plano:', status);
       },
-      error: (error) => {
+      error: (error: any) => {
         console.log('No se pudo cargar el estado del análisis en segundo plano:', error);
       }
     });
@@ -584,14 +584,14 @@ export class ModulesComponent implements OnInit {
     this.analysisErrorMessage = '';
 
     this.modulesService.syncRepositoryAnalysis('nsdk-sources').subscribe({
-      next: (response) => {
+      next: (response: any) => {
         console.log('Análisis sincronizado:', response);
         this.isLoadingAnalysis = false;
 
         // Recargar la raíz después de la sincronización
         this.loadRepositoryRoot();
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Error sincronizando análisis:', error);
         this.analysisErrorMessage = 'Error al sincronizar el análisis del repositorio';
         this.isLoadingAnalysis = false;
@@ -609,13 +609,13 @@ export class ModulesComponent implements OnInit {
 
     // Obtener estado del análisis
     this.modulesService.getRepositoryAnalysisStatus('nsdk-sources').subscribe({
-      next: (status) => {
+      next: (status: any) => {
         this.analysisStatus = status;
         console.log('Estado del análisis:', status);
 
         // Cargar todos los análisis
         this.modulesService.getRepositoryAnalysis('nsdk-sources').subscribe({
-          next: (response) => {
+          next: (response: any) => {
             this.nsdkAnalyses = response.analyses;
             console.log('Análisis cargados desde BD:', response);
 
@@ -626,14 +626,14 @@ export class ModulesComponent implements OnInit {
             this.dataSource.data = flatTreeData;
             this.isLoading = false;
           },
-          error: (error) => {
+          error: (error: any) => {
             console.error('Error cargando análisis desde BD:', error);
             this.errorMessage = 'Error al cargar análisis desde la base de datos';
             this.isLoading = false;
           }
         });
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Error obteniendo estado del análisis:', error);
         this.errorMessage = 'Error al obtener el estado del análisis';
         this.isLoading = false;
@@ -923,7 +923,7 @@ export class ModulesComponent implements OnInit {
     console.log('Construyendo estructura de directorios...');
 
     this.modulesService.buildRepositoryTree('nsdk-sources').subscribe({
-      next: (response) => {
+      next: (response: any) => {
         console.log('Estructura de directorios construida:', response);
         this.snackBar.open(
           `Estructura de directorios construida. Root ID: ${response.root_directory_id}`,
@@ -936,7 +936,7 @@ export class ModulesComponent implements OnInit {
           this.loadModulesFromBackend();
         }, 2000);
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Error construyendo estructura de directorios:', error);
         this.snackBar.open(
           'Error al construir la estructura de directorios',
@@ -954,7 +954,7 @@ export class ModulesComponent implements OnInit {
     const repoUrl = 'https://repo.plexus.services/jose.diosotero/nsdk-sources.git';
 
     this.modulesService.vectorizeRepository(repoUrl, 'main').subscribe({
-      next: (response) => {
+      next: (response: any) => {
         console.log('Vectorización iniciada:', response);
         this.snackBar.open(
           `Vectorización iniciada. Batch ID: ${response.batch_id}`,
@@ -967,7 +967,7 @@ export class ModulesComponent implements OnInit {
           this.loadModulesFromBackend();
         }, 3000);
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Error en vectorización:', error);
         this.snackBar.open(
           'Error al iniciar vectorización',
