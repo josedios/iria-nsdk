@@ -154,6 +154,41 @@ class DirectoryTreeService:
                 'children': []
             })
         
+        # Fallback: si la BD no tiene archivos para este directorio, listar archivos del disco
+        try:
+            # Construir set de paths ya incluidos para evitar duplicados
+            existing_file_paths = set()
+            for child in result['children']:
+                if child.get('is_file'):
+                    existing_file_paths.add(child.get('path'))
+
+            dir_path = Path(directory.path)
+            if dir_path.exists() and dir_path.is_dir():
+                for item in dir_path.iterdir():
+                    # Solo archivos inmediatos (no recursivo)
+                    if item.is_file():
+                        file_path_str = str(item)
+                        if file_path_str in existing_file_paths:
+                            continue
+                        # Añadir archivo del disco con metadatos mínimos
+                        try:
+                            size_kb = round(item.stat().st_size / 1024.0, 2)
+                        except Exception:
+                            size_kb = None
+                        result['children'].append({
+                            'id': None,
+                            'name': item.name,
+                            'type': 'other',
+                            'path': file_path_str,
+                            'is_file': True,
+                            'is_dir': False,
+                            'size_kb': size_kb,
+                            'expandable': False,
+                            'children': []
+                        })
+        except Exception as e:
+            logger.warning(f"Fallback de listado de archivos en disco falló para {directory.path}: {str(e)}")
+        
         return result
     
     def get_root_structure(self, repository_name: str) -> Dict[str, Any]:

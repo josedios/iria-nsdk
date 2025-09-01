@@ -345,7 +345,7 @@ export class DynamicDataSource extends DataSource<FlatNode> {
    */
   private convertToFlatNodes(treeNode: RepositoryTreeNode[], level: number): FlatNode[] {
     return treeNode.map(child => ({
-      expandable: child.is_dir && (child.dir_count || 0) > 0,
+      expandable: child.is_dir && (((child.dir_count || 0) + (child.file_count || 0)) > 0),
       name: child.name,
       type: child.type,
       status: 'analyzed',
@@ -532,7 +532,7 @@ export class ModulesComponent implements OnInit {
    */
   convertTreeToFlatNodes(treeNode: RepositoryTreeNode[]): FlatNode[] {
     return treeNode.map(child => ({
-      expandable: child.is_dir && (child.dir_count || 0) > 0,
+      expandable: child.is_dir && (((child.dir_count || 0) + (child.file_count || 0)) > 0),
       name: child.name,
       type: child.type,
       status: 'analyzed',
