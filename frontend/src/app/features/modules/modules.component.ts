@@ -1,7 +1,8 @@
+import { CollectionViewer, DataSource, SelectionChange } from '@angular/cdk/collections';
 import { FlatTreeControl } from '@angular/cdk/tree';
 import { CommonModule } from '@angular/common';
 import { HttpClientModule } from '@angular/common/http';
-import { Component, OnInit } from '@angular/core';
+import { Component, Injectable, OnInit } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
@@ -13,7 +14,9 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatTreeFlatDataSource, MatTreeFlattener, MatTreeModule } from '@angular/material/tree';
+import { MatTreeModule } from '@angular/material/tree';
+import { BehaviorSubject, merge, Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { AnalysisStatus, ModulesService, NSDKAnalysis, NSDKScreen, RepositoryTreeNode } from './modules.service';
 
 interface ModuleNode {
@@ -40,9 +43,9 @@ interface ModuleNode {
   fields?: string[];
   button_count?: number;
   buttons?: string[];
-  isLoading?: boolean; // Nuevo campo para indicar si se está cargando el contenido
-  expandable?: boolean; // Campo para indicar si el nodo se puede expandir
-  level?: number; // Nivel de profundidad en el árbol
+  isLoading?: boolean;
+  expandable?: boolean;
+  level?: number;
 }
 
 interface FlatNode {
@@ -70,7 +73,7 @@ interface FlatNode {
   fields?: string[];
   button_count?: number;
   buttons?: string[];
-  isLoading?: boolean; // Nuevo campo para indicar si se está cargando el contenido
+  isLoading?: boolean;
 }
 
 interface AnalysisData {
@@ -99,6 +102,278 @@ interface AnalysisData {
   };
 }
 
+/**
+ * DynamicDataSource personalizado que maneja correctamente la expansión/contracción
+ */
+@Injectable()
+export class DynamicDataSource extends DataSource<FlatNode> {
+  dataChange: BehaviorSubject<FlatNode[]> = new BehaviorSubject<FlatNode[]>([]);
+  private expandedNodes = new Set<string>(); // Mantener registro de nodos expandidos
+  private isLoadingChildren = false; // Bandera para evitar eventos durante la carga
+
+  get data(): FlatNode[] { return this.dataChange.value; }
+  set data(value: FlatNode[]) {
+    this.treeControl.dataNodes = value;
+    this.dataChange.next(value);
+  }
+
+  constructor(private treeControl: FlatTreeControl<FlatNode>,
+    private modulesService: ModulesService) {
+    super();
+  }
+
+  connect(collectionViewer: CollectionViewer): Observable<FlatNode[]> {
+    this.treeControl.expansionModel.changed.subscribe(change => {
+      if ((change as SelectionChange<FlatNode>).added ||
+        (change as SelectionChange<FlatNode>).removed) {
+        this.handleTreeControl(change as SelectionChange<FlatNode>);
+      }
+    });
+
+    return merge(collectionViewer.viewChange, this.dataChange).pipe(map(() => this.data));
+  }
+
+  disconnect(collectionViewer: CollectionViewer): void {
+    // Cleanup cuando se desconecta
+  }
+
+  /** Handle expand/collapse behaviors */
+  handleTreeControl(change: SelectionChange<FlatNode>) {
+    console.log('=== handleTreeControl ===');
+    console.log('Change:', change);
+    console.log('Added:', change.added);
+    console.log('Removed:', change.removed);
+    console.log('isLoadingChildren:', this.isLoadingChildren);
+
+    // Si estamos cargando hijos, ignorar eventos de contracción
+    if (this.isLoadingChildren && change.removed && change.removed.length > 0) {
+      console.log('Ignorando evento de contracción durante carga de hijos');
+      return;
+    }
+
+    if (change.added) {
+      change.added.forEach((node) => {
+        console.log(`Expandiendo nodo: ${node.name} (ID: ${node.id})`);
+        this.expandedNodes.add(node.id || node.path); // Registrar como expandido
+        this.toggleNode(node, true);
+      });
+    }
+    if (change.removed) {
+      change.removed.reverse().forEach((node) => {
+        console.log(`Contrayendo nodo: ${node.name} (ID: ${node.id})`);
+        this.expandedNodes.delete(node.id || node.path); // Remover de expandidos
+        this.toggleNode(node, false);
+      });
+    }
+  }
+
+  /**
+   * Toggle the node, remove from display list
+   */
+  toggleNode(node: FlatNode, expand: boolean) {
+    console.log(`=== toggleNode ===`);
+    console.log(`Nodo: ${node.name}, Expand: ${expand}, ID: ${node.id}`);
+    console.log(`TreeControl isExpanded: ${this.treeControl.isExpanded(node)}`);
+
+    if (!node.is_dir || !node.id) {
+      console.log('No es directorio o no tiene ID, saliendo...');
+      return;
+    }
+
+    const index = this.data.indexOf(node);
+    if (index < 0) {
+      console.log('No se encontró el nodo en el dataSource');
+      return;
+    }
+
+    // Verificar si ya tiene hijos cargados - buscar hijos directos del siguiente nivel
+    const hasLoadedChildren = this.data.some(n =>
+      n.level === node.level + 1 &&
+      n.path.startsWith(node.path + '\\') && // Usar backslash para Windows paths
+      this.isDirectChild(node.path, n.path)
+    );
+
+    console.log(`Has loaded children: ${hasLoadedChildren}`);
+    console.log(`Node path: ${node.path}, level: ${node.level}`);
+
+    if (expand) {
+      if (hasLoadedChildren) {
+        console.log('Ya tiene hijos cargados, contraer...');
+        // Si ya tiene hijos cargados, contraer el nodo
+        this.collapseNode(node, index);
+        // Remover del registro de expandidos
+        this.expandedNodes.delete(node.id || node.path);
+        return;
+      }
+
+      console.log('Cargando hijos del directorio...');
+      node.isLoading = true;
+      this.isLoadingChildren = true; // Marcar que estamos cargando
+
+      // Cargar hijos del directorio
+      this.modulesService.getDirectoryContents('nsdk-sources', node.id).subscribe({
+        next: (directoryContents) => {
+          console.log(`Hijos cargados para ${node.name}:`, directoryContents);
+          const children = this.convertToFlatNodes(directoryContents, node.level + 1);
+
+          // Encontrar la posición correcta para insertar los hijos
+          const insertIndex = this.findInsertPosition(node, index);
+          console.log(`Insertando ${children.length} hijos en posición ${insertIndex}`);
+
+          // Insertar los hijos en la posición correcta
+          this.data.splice(insertIndex, 0, ...children);
+
+          // Marcar el nodo como expandible si tiene hijos
+          node.expandable = children.length > 0;
+
+          // Notificar el cambio
+          this.dataChange.next(this.data);
+          node.isLoading = false;
+          this.isLoadingChildren = false; // Marcar que terminamos de cargar
+
+          console.log(`Nodo ${node.name} expandido con ${children.length} hijos`);
+        },
+        error: (error) => {
+          console.error(`Error cargando contenido del directorio ${node.name}:`, error);
+          node.isLoading = false;
+          this.isLoadingChildren = false; // Marcar que terminamos de cargar
+        }
+      });
+    } else {
+      console.log('Contrayendo nodo...');
+      // Contraer el nodo
+      this.collapseNode(node, index);
+    }
+  }
+
+  /**
+   * Verifica si un nodo es hijo directo de otro
+   */
+  private isDirectChild(parentPath: string, childPath: string): boolean {
+    // Normalizar paths para Windows
+    const normalizedParent = parentPath.replace(/\\/g, '/');
+    const normalizedChild = childPath.replace(/\\/g, '/');
+
+    // Verificar que el hijo empiece con el path del padre + '/'
+    if (!normalizedChild.startsWith(normalizedParent + '/')) {
+      return false;
+    }
+
+    // Verificar que no haya más niveles de directorio
+    const relativePath = normalizedChild.substring(normalizedParent.length + 1);
+    return !relativePath.includes('/');
+  }
+
+  /**
+   * Encuentra la posición correcta para insertar los hijos
+   */
+  private findInsertPosition(node: FlatNode, nodeIndex: number): number {
+    // Buscar el último hijo directo o el siguiente nodo del mismo nivel
+    for (let i = nodeIndex + 1; i < this.data.length; i++) {
+      const currentNode = this.data[i];
+
+      // Si encontramos un nodo del mismo nivel o superior, insertar antes
+      if (currentNode.level <= node.level) {
+        return i;
+      }
+
+      // Si es un hijo directo, continuar buscando
+      if (this.isDirectChild(node.path, currentNode.path)) {
+        continue;
+      }
+
+      // Si encontramos un nodo que no es hijo directo, insertar antes
+      if (currentNode.level > node.level) {
+        return i;
+      }
+    }
+
+    // Si no encontramos nada, insertar al final
+    return this.data.length;
+  }
+
+  /**
+   * Contrae un nodo eliminando todos sus hijos
+   */
+  private collapseNode(node: FlatNode, index: number) {
+    console.log(`Contrayendo nodo ${node.name} desde índice ${index}`);
+
+    // Encontrar todos los hijos y nietos del directorio
+    const childrenToRemove: number[] = [];
+
+    for (let i = index + 1; i < this.data.length; i++) {
+      const currentNode = this.data[i];
+
+      // Si encontramos un nodo del mismo nivel o superior, paramos
+      if (currentNode.level <= node.level) {
+        console.log(`Parando en índice ${i}, nodo ${currentNode.name} del mismo nivel o superior`);
+        break;
+      }
+
+      // Si es un hijo directo o descendiente del directorio actual, marcarlo para eliminar
+      if (this.isDescendant(node.path, currentNode.path)) {
+        childrenToRemove.push(i);
+        console.log(`Marcando para eliminar: ${currentNode.name} (índice ${i})`);
+      }
+    }
+
+    console.log(`Eliminando ${childrenToRemove.length} nodos hijos`);
+
+    // Eliminar los hijos en orden inverso para no afectar los índices
+    for (let i = childrenToRemove.length - 1; i >= 0; i--) {
+      this.data.splice(childrenToRemove[i], 1);
+    }
+
+    // Notificar el cambio
+    this.dataChange.next(this.data);
+  }
+
+  /**
+   * Verifica si un nodo es descendiente de otro
+   */
+  private isDescendant(parentPath: string, childPath: string): boolean {
+    // Normalizar paths para Windows
+    const normalizedParent = parentPath.replace(/\\/g, '/');
+    const normalizedChild = childPath.replace(/\\/g, '/');
+
+    // Verificar que el hijo empiece con el path del padre + '/'
+    return normalizedChild.startsWith(normalizedParent + '/');
+  }
+
+  /**
+   * Convierte RepositoryTreeNode[] a FlatNode[]
+   */
+  private convertToFlatNodes(treeNode: RepositoryTreeNode[], level: number): FlatNode[] {
+    return treeNode.map(child => ({
+      expandable: child.is_dir && (child.dir_count || 0) > 0,
+      name: child.name,
+      type: child.type,
+      status: 'analyzed',
+      level: level,
+      path: child.path,
+      id: child.id,
+      developer: undefined, // RepositoryTreeNode no tiene esta propiedad
+      complexity: undefined, // RepositoryTreeNode no tiene esta propiedad
+      estimatedHours: undefined, // RepositoryTreeNode no tiene esta propiedad
+      is_file: child.is_file,
+      is_dir: child.is_dir,
+      file_count: child.file_count,
+      dir_count: child.dir_count,
+      size_kb: child.size_kb,
+      extension: child.extension,
+      line_count: child.line_count,
+      char_count: child.char_count,
+      function_count: child.function_count,
+      functions: child.functions || [],
+      field_count: child.field_count,
+      fields: child.fields || [],
+      button_count: child.button_count,
+      buttons: child.buttons || [],
+      isLoading: false
+    }));
+  }
+}
+
 @Component({
   selector: 'app-modules',
   standalone: true,
@@ -123,49 +398,12 @@ interface AnalysisData {
 })
 export class ModulesComponent implements OnInit {
 
-  private _transformer = (node: ModuleNode, level: number): FlatNode => {
-    return {
-      expandable: node.expandable || false,
-      name: node.name,
-      type: node.type,
-      status: node.status,
-      level: level,
-      path: node.path,
-      id: node.id,
-      developer: node.developer,
-      complexity: node.complexity,
-      estimatedHours: node.estimatedHours,
-      is_file: node.is_file,
-      is_dir: node.is_dir,
-      file_count: node.file_count,
-      dir_count: node.dir_count,
-      size_kb: node.size_kb,
-      extension: node.extension,
-      line_count: node.line_count,
-      char_count: node.char_count,
-      function_count: node.function_count,
-      functions: node.functions,
-      field_count: node.field_count,
-      fields: node.fields,
-      button_count: node.button_count,
-      buttons: node.buttons,
-      isLoading: node.isLoading || false
-    };
-  };
-
   treeControl = new FlatTreeControl<FlatNode>(
     node => node.level,
     node => node.expandable
   );
 
-  treeFlattener = new MatTreeFlattener(
-    this._transformer,
-    node => node.level,
-    node => node.expandable,
-    node => node.children
-  );
-
-  dataSource = new MatTreeFlatDataSource(this.treeControl, this.treeFlattener);
+  dataSource: DynamicDataSource;
 
   // Datos mock para demostración
   TREE_DATA: ModuleNode[] = [
@@ -235,8 +473,8 @@ export class ModulesComponent implements OnInit {
     private modulesService: ModulesService,
     private snackBar: MatSnackBar
   ) {
-    // Inicializar con datos vacíos
-    this.dataSource.data = [];
+    // Inicializar con DynamicDataSource
+    this.dataSource = new DynamicDataSource(this.treeControl, this.modulesService);
   }
 
   ngOnInit() {
@@ -270,8 +508,8 @@ export class ModulesComponent implements OnInit {
         console.log('Response.children[0]:', response.children?.[0]);
         console.log('=== FIN RESPUESTA ===');
 
-        // Convertir la respuesta del árbol a ModuleNode[]
-        const treeData = this.convertTreeToModuleNodes(response.children || []);
+        // Convertir la respuesta del árbol a FlatNode[]
+        const treeData = this.convertTreeToFlatNodes(response.children || []);
         console.log('TreeData convertido:', treeData);
         console.log('TreeData.length:', treeData.length);
 
@@ -290,92 +528,20 @@ export class ModulesComponent implements OnInit {
   }
 
   /**
- * Carga el contenido de un directorio cuando se expande
- */
-  loadDirectoryContents(node: FlatNode) {
-    if (!node.is_dir) {
-      return; // No es un directorio
-    }
-
-    // Verificar si ya tiene hijos cargados de manera más robusta
-    const hasLoadedChildren = this.dataSource.data.some(n =>
-      n.level === node.level + 1 &&
-      n.path.startsWith(node.path + '/') &&
-      n.path.split('/').length === node.path.split('/').length + 1
-    );
-
-    if (hasLoadedChildren) {
-      console.log(`El directorio ${node.name} ya tiene hijos cargados, saltando...`);
-      return; // Ya tiene hijos cargados
-    }
-
-    // Marcar como cargando
-    node.isLoading = true;
-
-    // Obtener el ID del directorio (no la ruta)
-    const directoryId = node.id;
-    if (!directoryId) {
-      console.error('No se puede cargar el directorio: falta el ID');
-      node.isLoading = false;
-      return;
-    }
-
-    this.modulesService.getDirectoryContents('nsdk-sources', directoryId).subscribe({
-      next: (directoryContents) => {
-        console.log(`Contenido del directorio ${node.name} (ID: ${directoryId}) cargado:`, directoryContents);
-        console.log('Tipo de directoryContents:', typeof directoryContents);
-        console.log('¿Es array?', Array.isArray(directoryContents));
-        console.log('Longitud:', directoryContents?.length);
-
-        // Convertir el contenido del directorio a ModuleNode[]
-        const children = this.convertTreeToModuleNodes(directoryContents);
-        console.log('Children convertidos:', children);
-        console.log('Longitud de children:', children?.length);
-
-        // Encontrar el nodo en el árbol y actualizar sus hijos
-        this.updateNodeChildren(node, children);
-
-        // Actualizar el dataSource
-        this.dataSource.data = [...this.dataSource.data];
-
-        node.isLoading = false;
-      },
-      error: (error) => {
-        console.error(`Error cargando contenido del directorio ${node.name} (ID: ${directoryId}):`, error);
-        node.isLoading = false;
-
-        // Mostrar error en el nodo
-        this.snackBar.open(`Error al cargar el directorio ${node.name}`, 'Cerrar', { duration: 3000 });
-      }
-    });
-  }
-
-  /**
-   * Actualiza los hijos de un nodo en el árbol
+   * Convierte RepositoryTreeNode[] a FlatNode[]
    */
-  private updateNodeChildren(node: FlatNode, children: ModuleNode[]) {
-    console.log('=== updateNodeChildren ===');
-    console.log('Nodo a actualizar:', node);
-    console.log('Children recibidos:', children);
-    console.log('DataSource actual:', this.dataSource.data);
-
-    // Encontrar el índice del nodo en el dataSource
-    const nodeIndex = this.dataSource.data.findIndex(n => n.path === node.path);
-    console.log('Índice del nodo encontrado:', nodeIndex);
-    if (nodeIndex === -1) {
-      console.error('No se encontró el nodo en el dataSource');
-      return;
-    }
-
-    // Convertir los hijos a FlatNode[]
-    const flatChildren: FlatNode[] = children.map((child, index) => ({
-      expandable: child.expandable || false,
+  convertTreeToFlatNodes(treeNode: RepositoryTreeNode[]): FlatNode[] {
+    return treeNode.map(child => ({
+      expandable: child.is_dir && (child.dir_count || 0) > 0,
       name: child.name,
       type: child.type,
-      status: child.status,
-      level: node.level + 1,
+      status: 'analyzed',
+      level: 0,
       path: child.path,
-      id: child.id, // Importante: incluir el ID para que se puedan expandir
+      id: child.id,
+      developer: undefined, // RepositoryTreeNode no tiene esta propiedad
+      complexity: undefined, // RepositoryTreeNode no tiene esta propiedad
+      estimatedHours: undefined, // RepositoryTreeNode no tiene esta propiedad
       is_file: child.is_file,
       is_dir: child.is_dir,
       file_count: child.file_count,
@@ -392,75 +558,11 @@ export class ModulesComponent implements OnInit {
       buttons: child.buttons || [],
       isLoading: false
     }));
-
-    // Insertar los hijos después del nodo actual
-    const newData = [...this.dataSource.data];
-    console.log('Data antes de insertar:', newData.length, 'elementos');
-    newData.splice(nodeIndex + 1, 0, ...flatChildren);
-    console.log('Data después de insertar:', newData.length, 'elementos');
-
-    // Actualizar el dataSource
-    this.dataSource.data = newData;
-    console.log('DataSource actualizado. Nuevo tamaño:', this.dataSource.data.length);
-
-    // Marcar el nodo como expandible si tiene hijos
-    node.expandable = children.length > 0;
-
-    // También marcar los hijos como expandibles si son directorios y tienen subdirectorios
-    flatChildren.forEach(child => {
-      if (child.is_dir && (child.dir_count || 0) > 0) {
-        child.expandable = true;
-      }
-    });
-
-    console.log('Hijos marcados como expandibles:', flatChildren.filter(c => c.expandable).length);
   }
 
   /**
-   * Convierte un RepositoryTreeNode a ModuleNode[]
-   */
-  convertTreeToModuleNodes(treeNode: RepositoryTreeNode | RepositoryTreeNode[]): ModuleNode[] {
-    const result: ModuleNode[] = [];
-
-    // Si es un array, procesar cada elemento
-    if (Array.isArray(treeNode)) {
-      for (const child of treeNode) {
-        const moduleNode: ModuleNode = {
-          name: child.name,
-          type: child.type,
-          path: child.path,
-          id: child.id,
-          is_file: child.is_file,
-          is_dir: child.is_dir,
-          file_count: child.file_count,
-          dir_count: child.dir_count,
-          size_kb: child.size_kb,
-          extension: child.extension,
-          line_count: child.line_count,
-          char_count: child.char_count,
-          function_count: child.function_count,
-          functions: child.functions || [],
-          field_count: child.field_count,
-          fields: child.fields || [],
-          button_count: child.button_count,
-          buttons: child.buttons || [],
-          status: 'analyzed',
-          children: [],
-          // Marcar como expandible si es un directorio y tiene subdirectorios
-          expandable: child.is_dir && (child.dir_count || 0) > 0,
-          level: 0 // Nivel raíz (se ajustará en updateNodeChildren)
-        };
-
-        result.push(moduleNode);
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Carga análisis en segundo plano para estadísticas
-   */
+ * Carga análisis en segundo plano para estadísticas
+ */
   loadAnalysisInBackground() {
     this.modulesService.getRepositoryAnalysisStatus('nsdk-sources').subscribe({
       next: (status) => {
@@ -519,7 +621,9 @@ export class ModulesComponent implements OnInit {
 
             // Convertir a estructura de árbol para el componente
             const treeData = this.convertAnalysesToTreeNodes(response.analyses);
-            this.dataSource.data = treeData;
+            // Convertir ModuleNode[] a FlatNode[] para el dataSource
+            const flatTreeData = this.convertModuleNodesToFlatNodes(treeData);
+            this.dataSource.data = flatTreeData;
             this.isLoading = false;
           },
           error: (error) => {
@@ -613,6 +717,53 @@ export class ModulesComponent implements OnInit {
       status: analysis.analysis_status as any,
       children: []
     };
+  }
+
+  /**
+   * Convierte ModuleNode[] a FlatNode[] para el dataSource
+   */
+  private convertModuleNodesToFlatNodes(nodes: ModuleNode[]): FlatNode[] {
+    const flatNodes: FlatNode[] = [];
+
+    const flattenNodes = (nodeList: ModuleNode[], level: number) => {
+      for (const node of nodeList) {
+        flatNodes.push({
+          expandable: !!node.children && node.children.length > 0,
+          name: node.name,
+          type: node.type,
+          status: node.status,
+          level: level,
+          path: node.path,
+          id: node.id,
+          developer: node.developer,
+          complexity: node.complexity,
+          estimatedHours: node.estimatedHours,
+          is_file: node.is_file,
+          is_dir: node.is_dir,
+          file_count: node.file_count,
+          dir_count: node.dir_count,
+          size_kb: node.size_kb,
+          extension: node.extension,
+          line_count: node.line_count,
+          char_count: node.char_count,
+          function_count: node.function_count,
+          functions: node.functions || [],
+          field_count: node.field_count,
+          fields: node.fields || [],
+          button_count: node.button_count,
+          buttons: node.buttons || [],
+          isLoading: node.isLoading || false
+        });
+
+        // Recursivamente procesar hijos
+        if (node.children && node.children.length > 0) {
+          flattenNodes(node.children, level + 1);
+        }
+      }
+    };
+
+    flattenNodes(nodes, 0);
+    return flatNodes;
   }
 
   /**

@@ -6,8 +6,7 @@
         <mat-icon>refresh</mat-icon>
         Actualizar
       </button>
-      <button mat-raised-button color="warn" (click)="syncAnalysisWithDatabase()" 
-              [disabled]="isLoadingAnalysis">
+      <button mat-raised-button color="warn" (click)="syncAnalysisWithDatabase()" [disabled]="isLoadingAnalysis">
         <mat-icon>sync</mat-icon>
         {{ isLoadingAnalysis ? 'Sincronizando...' : 'Sincronizar Análisis' }}
       </button>
@@ -126,8 +125,7 @@
           <mat-tree-node *matTreeNodeDef="let node;when: hasChild" matTreeNodePadding>
             <div class="tree-node">
               <div class="node-content">
-                <button mat-icon-button matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name"
-                        (click)="loadDirectoryContents(node)">
+                <button mat-icon-button matTreeNodeToggle [attr.aria-label]="'Toggle ' + node.name">
                   <mat-icon class="mat-icon-rtl-mirror">
                     {{ treeControl.isExpanded(node) ? 'expand_more' : 'chevron_right' }}
                   </mat-icon>
