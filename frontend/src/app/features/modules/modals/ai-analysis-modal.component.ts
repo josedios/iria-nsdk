@@ -1,15 +1,16 @@
 import { CommonModule } from '@angular/common';
-import { Component, Inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { Component, Inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
-import { MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { firstValueFrom } from 'rxjs';
+import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-ai-analysis-modal',
@@ -58,7 +59,7 @@ export class AIAnalysisModalComponent {
       // Llamar al endpoint de generación de código
       const response = await firstValueFrom(
         this.http.post<{ success: boolean, branch_name: string, message?: string }>(
-          `http://localhost:8000/repositories/nsdk-sources/files/${this.data.node.id}/generate-code`,
+          `${environment.apiUrl}/repositories/${this.data.node.repository_name}/files/${this.data.node.id}/generate-code`,
           null
         )
       );
@@ -86,6 +87,70 @@ export class AIAnalysisModalComponent {
       // Mostrar mensaje de error
       this.snackBar.open(
         `Error generando código: ${error?.message || error}`,
+        'Cerrar',
+        { duration: 5000 }
+      );
+    }
+  }
+
+  async generateFrontend() {
+    try {
+      console.log('Generando solo código frontend...');
+
+      // Mostrar spinner
+      this.snackBar.open('Generando código frontend...', 'Cerrar', { duration: 2000 });
+
+      const response = await this.http.post<any>(
+        `${environment.apiUrl}/repositories/${this.data.node.repository_name}/files/${this.data.node.id}/generate-frontend`,
+        {}
+      ).toPromise();
+
+      if (response.success) {
+        this.snackBar.open(
+          `Frontend generado exitosamente: ${response.frontend.files_generated} archivos`,
+          'Cerrar',
+          { duration: 5000 }
+        );
+      } else {
+        throw new Error(response.message || 'Error generando frontend');
+      }
+
+    } catch (error: any) {
+      console.error('Error generando frontend:', error);
+      this.snackBar.open(
+        `Error generando frontend: ${error?.message || error}`,
+        'Cerrar',
+        { duration: 5000 }
+      );
+    }
+  }
+
+  async generateBackend() {
+    try {
+      console.log('Generando solo código backend...');
+
+      // Mostrar spinner
+      this.snackBar.open('Generando código backend...', 'Cerrar', { duration: 2000 });
+
+      const response = await this.http.post<any>(
+        `${environment.apiUrl}/repositories/${this.data.node.repository_name}/files/${this.data.node.id}/generate-backend`,
+        {}
+      ).toPromise();
+
+      if (response.success) {
+        this.snackBar.open(
+          `Backend generado exitosamente: ${response.backend.files_generated} archivos`,
+          'Cerrar',
+          { duration: 5000 }
+        );
+      } else {
+        throw new Error(response.message || 'Error generando backend');
+      }
+
+    } catch (error: any) {
+      console.error('Error generando backend:', error);
+      this.snackBar.open(
+        `Error generando backend: ${error?.message || error}`,
         'Cerrar',
         { duration: 5000 }
       );

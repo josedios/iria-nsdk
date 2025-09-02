@@ -1854,13 +1854,12 @@ async def generate_code_from_analysis(
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         
         # Obtener análisis IA más reciente
-        ai_analyses = ai_analysis_repo.get_by_file_analysis_id(file_id)
-        if not ai_analyses:
+        latest_analysis = ai_analysis_repo.get_by_file_analysis_id(file_id)
+        if not latest_analysis:
             raise HTTPException(status_code=404, detail="No hay análisis IA disponible para este archivo")
         
-        # Obtener el análisis más reciente
-        latest_analysis = max(ai_analyses, key=lambda x: x.created_at)
-        analysis_data = latest_analysis.analysis_data
+        # Convertir la entidad a diccionario para obtener los datos del análisis
+        analysis_data = latest_analysis.to_dict()
         
         # Obtener configuración activa para las rutas de repositorios
         active_config = await config_repo.find_active()
@@ -1868,19 +1867,82 @@ async def generate_code_from_analysis(
             raise HTTPException(status_code=404, detail="No hay configuración activa")
         
         config_data = active_config.config_data
-        frontend_repo_path = config_data.get('frontendRepo', {}).get('url', '')
-        backend_repo_path = config_data.get('backendRepo', {}).get('url', '')
+        frontend_repo_url = config_data.get('frontendRepo', {}).get('url', '')
+        backend_repo_url = config_data.get('backendRepo', {}).get('url', '')
         
-        if not frontend_repo_path or not backend_repo_path:
-            raise HTTPException(status_code=400, detail="Rutas de repositorios no configuradas")
+        if not frontend_repo_url or not backend_repo_url:
+            raise HTTPException(status_code=400, detail="URLs de repositorios no configuradas")
         
-        # Inicializar servicios necesarios
-        vectorization_use_case = VectorizationUseCase()
+        # Obtener rutas locales de los repositorios usando RepositoryManagerService
+        from .infrastructure.services.repository_manager_service import RepositoryManagerService
+        repo_manager = RepositoryManagerService()
+        
+        # Extraer nombres de repositorios de las URLs
+        def extract_repo_name_from_url(url: str) -> str:
+            """Extrae el nombre del repositorio de una URL Git"""
+            import re
+            # Patrón para extraer el nombre del repo de URLs como:
+            # https://repo.plexus.services/jose.diosotero/poc-nsdk-new-front.git
+            # https://github.com/user/repo.git
+            match = re.search(r'/([^/]+)\.git$', url)
+            if match:
+                return match.group(1)
+            # Si no termina en .git, tomar la última parte
+            match = re.search(r'/([^/]+)/?$', url)
+            if match:
+                return match.group(1)
+            return url.split('/')[-1]  # Fallback
+        
+        frontend_repo_name = extract_repo_name_from_url(frontend_repo_url)
+        backend_repo_name = extract_repo_name_from_url(backend_repo_url)
+        
+        # Verificar y clonar repositorios si no existen
+        # Frontend
+        if not repo_manager.is_repository_cloned(frontend_repo_name):
+            logger.info(f"Repositorio frontend {frontend_repo_name} no existe, clonando automáticamente...")
+            try:
+                frontend_repo_path = repo_manager.clone_repository(
+                    frontend_repo_url, 
+                    frontend_repo_name, 
+                    branch='main'
+                )
+                logger.info(f"Repositorio frontend clonado exitosamente en: {frontend_repo_path}")
+            except Exception as e:
+                logger.error(f"Error clonando repositorio frontend: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error clonando repositorio frontend: {str(e)}")
+        else:
+            frontend_repo_path = repo_manager.get_repository_path(frontend_repo_name)
+        
+        # Backend
+        if not repo_manager.is_repository_cloned(backend_repo_name):
+            logger.info(f"Repositorio backend {backend_repo_name} no existe, clonando automáticamente...")
+            try:
+                backend_repo_path = repo_manager.clone_repository(
+                    backend_repo_url, 
+                    backend_repo_name, 
+                    branch='main'
+                )
+                logger.info(f"Repositorio backend clonado exitosamente en: {backend_repo_path}")
+            except Exception as e:
+                logger.error(f"Error clonando repositorio backend: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error clonando repositorio backend: {str(e)}")
+        else:
+            backend_repo_path = repo_manager.get_repository_path(backend_repo_name)
+        
+        # Usar servicios ya inicializados
+        # vectorization_use_case ya está inicializado globalmente
         llm_service = LLMServiceImpl()
         
         # Inicializar LLM service con configuración activa
         from .domain.entities.configuration import LLMConfig, LLMProvider
         llm_config_data = config_data.get('llmConfig', {})
+        
+        logger.info(f"Configuración LLM encontrada: {llm_config_data}")
+        
+        if not llm_config_data:
+            logger.error("No se encontró configuración LLM en la configuración activa")
+            raise HTTPException(status_code=400, detail="Configuración LLM no encontrada")
+        
         llm_config = LLMConfig(
             provider=LLMProvider(llm_config_data.get('provider', 'openai')),
             api_key=llm_config_data.get('apiKey'),
@@ -1889,9 +1951,12 @@ async def generate_code_from_analysis(
             max_tokens=llm_config_data.get('maxTokens', 4096),
             temperature=llm_config_data.get('temperature', 0.7)
         )
+        
+        logger.info(f"Inicializando LLM service con: provider={llm_config.provider}, model={llm_config.model_name}")
         await llm_service.initialize(llm_config)
         
         # Crear instancia del servicio de consulta NSDK
+        from .application.services.nsdk_query_service import NSDKQueryService
         nsdk_query_service = NSDKQueryService(db)
         
         # Crear instancia del servicio de generación de código
@@ -1914,4 +1979,227 @@ async def generate_code_from_analysis(
         raise
     except Exception as e:
         logger.error(f"Error generando código para {file_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error generando código: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error generando código: {str(e)}")
+
+@app.post("/repositories/{repo_name}/files/{file_id}/generate-frontend", tags=["Generación de Código"])
+async def generate_frontend_code(
+    repo_name: str,
+    file_id: str,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository),
+    ai_analysis_repo = Depends(get_ai_analysis_repository),
+    db: Session = Depends(get_db)
+):
+    """Genera solo código frontend a partir del análisis de IA"""
+    try:
+        # Obtener análisis del archivo
+        file_analysis = analysis_repo.get_by_id(file_id)
+        if not file_analysis:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        
+        # Obtener análisis IA más reciente
+        latest_analysis = ai_analysis_repo.get_by_file_analysis_id(file_id)
+        if not latest_analysis:
+            raise HTTPException(status_code=404, detail="No hay análisis IA disponible para este archivo")
+        
+        # Convertir la entidad a diccionario para obtener los datos del análisis
+        analysis_data = latest_analysis.to_dict()
+        
+        # Obtener configuración activa para las rutas de repositorios
+        active_config = await config_repo.find_active()
+        if not active_config:
+            raise HTTPException(status_code=404, detail="No hay configuración activa")
+        
+        config_data = active_config.config_data
+        frontend_repo_url = config_data.get('frontendRepo', {}).get('url', '')
+        
+        if not frontend_repo_url:
+            raise HTTPException(status_code=400, detail="URL de repositorio frontend no configurada")
+        
+        # Obtener rutas locales de los repositorios usando RepositoryManagerService
+        from .infrastructure.services.repository_manager_service import RepositoryManagerService
+        repo_manager = RepositoryManagerService()
+        
+        # Extraer nombres de repositorios de las URLs
+        def extract_repo_name_from_url(url: str) -> str:
+            """Extrae el nombre del repositorio de una URL Git"""
+            import re
+            match = re.search(r'/([^/]+)\.git$', url)
+            if match:
+                return match.group(1)
+            match = re.search(r'/([^/]+)/?$', url)
+            if match:
+                return match.group(1)
+            return url.split('/')[-1]
+        
+        frontend_repo_name = extract_repo_name_from_url(frontend_repo_url)
+        
+        # Verificar si el repositorio existe, si no, clonarlo automáticamente
+        if not repo_manager.is_repository_cloned(frontend_repo_name):
+            logger.info(f"Repositorio frontend {frontend_repo_name} no existe, clonando automáticamente...")
+            try:
+                frontend_repo_path = repo_manager.clone_repository(
+                    frontend_repo_url, 
+                    frontend_repo_name, 
+                    branch='main'
+                )
+                logger.info(f"Repositorio frontend clonado exitosamente en: {frontend_repo_path}")
+            except Exception as e:
+                logger.error(f"Error clonando repositorio frontend: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error clonando repositorio frontend: {str(e)}")
+        else:
+            frontend_repo_path = repo_manager.get_repository_path(frontend_repo_name)
+        
+        # Usar servicios ya inicializados
+        llm_service = LLMServiceImpl()
+        
+        # Inicializar LLM service con configuración activa
+        from .domain.entities.configuration import LLMConfig, LLMProvider
+        llm_config_data = config_data.get('llmConfig', {})
+        
+        logger.info(f"Configuración LLM encontrada (frontend): {llm_config_data}")
+        
+        if not llm_config_data:
+            logger.error("No se encontró configuración LLM en la configuración activa")
+            raise HTTPException(status_code=400, detail="Configuración LLM no encontrada")
+        
+        llm_config = LLMConfig(
+            provider=LLMProvider(llm_config_data.get('provider', 'openai')),
+            api_key=llm_config_data.get('apiKey'),
+            base_url=llm_config_data.get('baseUrl'),
+            model_name=llm_config_data.get('modelName', 'gpt-4'),
+            max_tokens=llm_config_data.get('maxTokens', 4096),
+            temperature=llm_config_data.get('temperature', 0.7)
+        )
+        
+        logger.info(f"Inicializando LLM service (frontend) con: provider={llm_config.provider}, model={llm_config.model_name}")
+        await llm_service.initialize(llm_config)
+        
+        # Crear instancia del servicio de consulta NSDK
+        from .application.services.nsdk_query_service import NSDKQueryService
+        nsdk_query_service = NSDKQueryService(db)
+        
+        # Crear instancia del servicio de generación de código
+        from .application.services.code_generation_service import CodeGenerationService
+        code_generation_service = CodeGenerationService(vectorization_use_case, llm_service, nsdk_query_service)
+        
+        # Generar solo código frontend
+        result = await code_generation_service.generate_frontend_only(
+            analysis_data, 
+            file_analysis.file_name,
+            str(frontend_repo_path)
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generando código frontend: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generando código frontend: {str(e)}")
+
+@app.post("/repositories/{repo_name}/files/{file_id}/generate-backend", tags=["Generación de Código"])
+async def generate_backend_code(
+    repo_name: str,
+    file_id: str,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository),
+    ai_analysis_repo = Depends(get_ai_analysis_repository),
+    db: Session = Depends(get_db)
+):
+    """Genera solo código backend a partir del análisis de IA"""
+    try:
+        # Obtener análisis del archivo
+        file_analysis = analysis_repo.get_by_id(file_id)
+        if not file_analysis:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        
+        # Obtener análisis IA más reciente
+        latest_analysis = ai_analysis_repo.get_by_file_analysis_id(file_id)
+        if not latest_analysis:
+            raise HTTPException(status_code=404, detail="No hay análisis IA disponible para este archivo")
+        
+        # Convertir la entidad a diccionario para obtener los datos del análisis
+        analysis_data = latest_analysis.to_dict()
+        
+        # Obtener configuración activa para las rutas de repositorios
+        active_config = await config_repo.find_active()
+        if not active_config:
+            raise HTTPException(status_code=404, detail="No hay configuración activa")
+        
+        config_data = active_config.config_data
+        backend_repo_url = config_data.get('backendRepo', {}).get('url', '')
+        
+        if not backend_repo_url:
+            raise HTTPException(status_code=400, detail="URL de repositorio backend no configurada")
+        
+        # Obtener rutas locales de los repositorios usando RepositoryManagerService
+        from .infrastructure.services.repository_manager_service import RepositoryManagerService
+        repo_manager = RepositoryManagerService()
+        
+        # Extraer nombres de repositorios de las URLs
+        def extract_repo_name_from_url(url: str) -> str:
+            """Extrae el nombre del repositorio de una URL Git"""
+            import re
+            match = re.search(r'/([^/]+)\.git$', url)
+            if match:
+                return match.group(1)
+            match = re.search(r'/([^/]+)/?$', url)
+            if match:
+                return match.group(1)
+            return url.split('/')[-1]
+        
+        backend_repo_name = extract_repo_name_from_url(backend_repo_url)
+        
+        # Verificar si el repositorio existe, si no, clonarlo automáticamente
+        if not repo_manager.is_repository_cloned(backend_repo_name):
+            logger.info(f"Repositorio backend {backend_repo_name} no existe, clonando automáticamente...")
+            try:
+                backend_repo_path = repo_manager.clone_repository(
+                    backend_repo_url, 
+                    backend_repo_name, 
+                    branch='main'
+                )
+                logger.info(f"Repositorio backend clonado exitosamente en: {backend_repo_path}")
+            except Exception as e:
+                logger.error(f"Error clonando repositorio backend: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error clonando repositorio backend: {str(e)}")
+        else:
+            backend_repo_path = repo_manager.get_repository_path(backend_repo_name)
+        
+        # Usar servicios ya inicializados
+        llm_service = LLMServiceImpl()
+        
+        # Inicializar LLM service con configuración activa
+        from .domain.entities.configuration import LLMConfig, LLMProvider
+        llm_config_data = config_data.get('llmConfig', {})
+        llm_config = LLMConfig(
+            provider=LLMProvider(llm_config_data.get('provider', 'openai')),
+            api_key=llm_config_data.get('apiKey'),
+            base_url=llm_config_data.get('baseUrl'),
+            model_name=llm_config_data.get('modelName', 'gpt-4'),
+            max_tokens=llm_config_data.get('maxTokens', 4096),
+            temperature=llm_config_data.get('temperature', 0.7)
+        )
+        await llm_service.initialize(llm_config)
+        
+        # Crear instancia del servicio de consulta NSDK
+        from .application.services.nsdk_query_service import NSDKQueryService
+        nsdk_query_service = NSDKQueryService(db)
+        
+        # Crear instancia del servicio de generación de código
+        from .application.services.code_generation_service import CodeGenerationService
+        code_generation_service = CodeGenerationService(vectorization_use_case, llm_service, nsdk_query_service)
+        
+        # Generar solo código backend
+        result = await code_generation_service.generate_backend_only(
+            analysis_data, 
+            file_analysis.file_name,
+            str(backend_repo_path)
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generando código backend: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generando código backend: {str(e)}") 

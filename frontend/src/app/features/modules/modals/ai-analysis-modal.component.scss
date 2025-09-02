@@ -112,8 +112,21 @@
 
 .modal-actions { 
   display: flex; 
-  gap: 10px; 
+  flex-direction: column;
+  gap: 15px; 
   padding: 20px; 
   border-top: 1px solid #eee; 
-  justify-content: flex-end; 
+}
+
+.generation-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }

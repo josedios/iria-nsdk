@@ -21,7 +21,13 @@ if DATABASE_URL.startswith("sqlite"):
         poolclass=StaticPool
     )
 else:
-    engine = create_engine(DATABASE_URL)
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=20,
+        max_overflow=30,
+        pool_timeout=60,
+        pool_recycle=3600
+    )
 
 # Crear sesión
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

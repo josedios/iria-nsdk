@@ -1145,7 +1145,10 @@ export class ModulesComponent implements OnInit {
           width: '95vw',
           height: '95vh',
           data: {
-            node: node,
+            node: {
+              ...node,
+              repository_name: repoName  // Agregar el nombre del repositorio
+            },
             analysis: response.analysis
           }
         });

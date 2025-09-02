@@ -42,6 +42,10 @@ class CodeGenerationService:
         try:
             logger.info(f"Iniciando generación de código para {file_name}")
             
+            # Validar datos de entrada antes de consumir tokens
+            self._validate_analysis_data(analysis_data, file_name)
+            self._validate_repository_paths(frontend_repo_path, backend_repo_path)
+            
             # 1. Generar código Angular
             logger.info("1. Generando código Angular...")
             frontend_code = await self._generate_frontend_code(analysis_data, file_name)
@@ -147,11 +151,14 @@ class CodeGenerationService:
         component_name = file_name.replace('.scr', '').replace('_', '-').lower()
         class_name = file_name.replace('.scr', '').replace('_', ' ').title().replace(' ', '')
         
+        # Serializar datos manejando UUIDs y otros tipos no serializables
+        serialized_data = self._serialize_analysis_data(analysis_data)
+        
         return f"""
 Eres un experto en Angular y Angular Material. Genera código completo para migrar la pantalla {file_name} a Angular.
 
 ANÁLISIS DE LA PANTALLA:
-{json.dumps(analysis_data, indent=2, ensure_ascii=False)}
+{json.dumps(serialized_data, indent=2, ensure_ascii=False)}
 
 REQUISITOS:
 1. Usar Angular 17+ con standalone components
@@ -193,11 +200,14 @@ IMPORTANTE:
         entity_name = file_name.replace('.scr', '').replace('_', ' ').title().replace(' ', '')
         table_name = analysis_data.get('backend', {}).get('database_table', 'T0SIPOLI')
         
+        # Serializar datos manejando UUIDs y otros tipos no serializables
+        serialized_data = self._serialize_analysis_data(analysis_data)
+        
         return f"""
 Eres un experto en Spring Boot, JPA/Hibernate y REST APIs. Genera código completo para migrar la pantalla {file_name} a Spring Boot.
 
 ANÁLISIS DE LA PANTALLA:
-{json.dumps(analysis_data, indent=2, ensure_ascii=False)}
+{json.dumps(serialized_data, indent=2, ensure_ascii=False)}
 
 REQUISITOS:
 1. Usar Spring Boot 3.x
@@ -309,6 +319,196 @@ IMPORTANTE:
             logger.error(f"Error extrayendo archivos Spring Boot: {str(e)}")
             raise
     
+    def _serialize_analysis_data(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Serializa los datos del análisis manejando UUIDs y otros tipos no serializables"""
+        import uuid
+        from datetime import datetime
+        
+        def serialize_value(value):
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            elif isinstance(value, datetime):
+                return value.isoformat()
+            elif isinstance(value, dict):
+                return {k: serialize_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [serialize_value(item) for item in value]
+            else:
+                return value
+        
+        return serialize_value(analysis_data)
+    
+    async def generate_frontend_only(
+        self, 
+        analysis_data: Dict[str, Any], 
+        file_name: str,
+        frontend_repo_path: str
+    ) -> Dict[str, Any]:
+        """Genera solo código frontend a partir del análisis de IA"""
+        try:
+            logger.info(f"Iniciando generación de código frontend para {file_name}")
+            
+            # Validar datos de entrada antes de consumir tokens
+            self._validate_analysis_data(analysis_data, file_name)
+            self._validate_repository_paths(frontend_repo_path, frontend_repo_path)  # Usar el mismo path para validación
+            
+            # Generar código Angular
+            logger.info("Generando código Angular...")
+            frontend_code = await self._generate_frontend_code(analysis_data, file_name)
+            
+            # Crear rama y aplicar cambios
+            logger.info("Creando rama y aplicando cambios...")
+            branch_name = f"feature/{file_name.replace('.scr', '').lower()}"
+            
+            # Crear rama en frontend
+            frontend_result = await self._create_branch_and_commit(
+                frontend_repo_path, 
+                branch_name, 
+                frontend_code, 
+                f"feat: Generar componente frontend {file_name.replace('.scr', '')}"
+            )
+            
+            return {
+                "success": True,
+                "file_name": file_name,
+                "frontend": {
+                    "files_generated": len(frontend_code),
+                    "branch_created": frontend_result["branch_created"],
+                    "commit_hash": frontend_result["commit_hash"]
+                },
+                "message": f"Código frontend generado exitosamente en rama {branch_name}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generando código frontend para {file_name}: {str(e)}")
+            return {
+                "success": False,
+                "file_name": file_name,
+                "error": str(e),
+                "message": f"Error generando código frontend: {str(e)}"
+            }
+    
+    async def generate_backend_only(
+        self, 
+        analysis_data: Dict[str, Any], 
+        file_name: str,
+        backend_repo_path: str
+    ) -> Dict[str, Any]:
+        """Genera solo código backend a partir del análisis de IA"""
+        try:
+            logger.info(f"Iniciando generación de código backend para {file_name}")
+            
+            # Validar datos de entrada antes de consumir tokens
+            self._validate_analysis_data(analysis_data, file_name)
+            self._validate_repository_paths(backend_repo_path, backend_repo_path)  # Usar el mismo path para validación
+            
+            # Generar código Spring Boot
+            logger.info("Generando código Spring Boot...")
+            backend_code = await self._generate_backend_code(analysis_data, file_name)
+            
+            # Crear rama y aplicar cambios
+            logger.info("Creando rama y aplicando cambios...")
+            branch_name = f"feature/{file_name.replace('.scr', '').lower()}"
+            
+            # Crear rama en backend
+            backend_result = await self._create_branch_and_commit(
+                backend_repo_path, 
+                branch_name, 
+                backend_code, 
+                f"feat: Generar entidad backend {file_name.replace('.scr', '')}"
+            )
+            
+            return {
+                "success": True,
+                "file_name": file_name,
+                "backend": {
+                    "files_generated": len(backend_code),
+                    "branch_created": backend_result["branch_created"],
+                    "commit_hash": backend_result["commit_hash"]
+                },
+                "message": f"Código backend generado exitosamente en rama {branch_name}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generando código backend para {file_name}: {str(e)}")
+            return {
+                "success": False,
+                "file_name": file_name,
+                "error": str(e),
+                "message": f"Error generando código backend: {str(e)}"
+            }
+    
+    def _validate_analysis_data(self, analysis_data: Dict[str, Any], file_name: str) -> None:
+        """Valida los datos del análisis antes de generar código"""
+        if not analysis_data:
+            raise ValueError("Los datos del análisis están vacíos")
+        
+        if not file_name or not file_name.endswith('.scr'):
+            raise ValueError(f"Nombre de archivo inválido: {file_name}")
+        
+        # Validar que existan los campos mínimos necesarios
+        required_fields = ['frontend', 'backend']
+        for field in required_fields:
+            if field not in analysis_data:
+                raise ValueError(f"Campo requerido '{field}' no encontrado en el análisis")
+        
+        logger.info(f"Datos del análisis validados correctamente para {file_name}")
+    
+    def _validate_repository_paths(self, frontend_repo_path: str, backend_repo_path: str) -> None:
+        """Valida que las rutas de los repositorios existan y sean válidas"""
+        import os
+        
+        if not frontend_repo_path or not backend_repo_path:
+            raise ValueError("Las rutas de los repositorios no pueden estar vacías")
+        
+        if not os.path.exists(frontend_repo_path):
+            raise ValueError(f"El repositorio frontend no existe en: {frontend_repo_path}")
+        
+        if not os.path.exists(backend_repo_path):
+            raise ValueError(f"El repositorio backend no existe en: {backend_repo_path}")
+        
+        # Verificar que sean directorios de Git
+        if not os.path.exists(os.path.join(frontend_repo_path, '.git')):
+            raise ValueError(f"El directorio frontend no es un repositorio Git: {frontend_repo_path}")
+        
+        if not os.path.exists(os.path.join(backend_repo_path, '.git')):
+            raise ValueError(f"El directorio backend no es un repositorio Git: {backend_repo_path}")
+        
+        logger.info("Rutas de repositorios validadas correctamente")
+    
+    def _get_unique_branch_name(self, repo_path: str, base_branch_name: str) -> str:
+        """Obtiene un nombre único para la rama, agregando sufijo si es necesario"""
+        import subprocess
+        
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(repo_path)
+            
+            # Verificar si la rama base existe
+            result = subprocess.run(['git', 'branch', '--list', base_branch_name], 
+                                  capture_output=True, text=True)
+            
+            if not result.stdout.strip():
+                # La rama no existe, usar el nombre base
+                return base_branch_name
+            
+            # La rama existe, buscar un nombre único
+            counter = 1
+            while True:
+                unique_name = f"{base_branch_name}-{counter}"
+                result = subprocess.run(['git', 'branch', '--list', unique_name], 
+                                      capture_output=True, text=True)
+                
+                if not result.stdout.strip():
+                    # Encontramos un nombre único
+                    logger.info(f"Rama {base_branch_name} ya existe, usando {unique_name}")
+                    return unique_name
+                
+                counter += 1
+                
+        finally:
+            os.chdir(original_cwd)
+
     async def _create_branch_and_commit(
         self, 
         repo_path: str, 
@@ -321,14 +521,52 @@ IMPORTANTE:
             import subprocess
             import os
             
+            # Obtener un nombre único para la rama
+            unique_branch_name = self._get_unique_branch_name(repo_path, branch_name)
+            
+            # Si no hay archivos para crear, solo crear la rama
+            if not files:
+                logger.info(f"No hay archivos para crear en {repo_path}, solo creando rama {unique_branch_name}")
+                original_cwd = os.getcwd()
+                os.chdir(repo_path)
+                
+                try:
+                    # Hacer pull para asegurar que tenemos la versión más reciente
+                    logger.info(f"Haciendo pull del repositorio {repo_path}")
+                    subprocess.run(['git', 'pull', 'origin', 'main'], check=True, capture_output=True)
+                    logger.info(f"Pull completado en {repo_path}")
+                    
+                    # Crear la rama (ya sabemos que es única)
+                    subprocess.run(['git', 'checkout', '-b', unique_branch_name], check=True, capture_output=True)
+                    logger.info(f"Rama {unique_branch_name} creada en {repo_path}")
+                    
+                    # Hacer push de la rama vacía
+                    subprocess.run(['git', 'push', '-u', 'origin', unique_branch_name], check=True, capture_output=True)
+                    logger.info(f"Rama {unique_branch_name} subida al repositorio remoto")
+                    
+                    return {
+                        "success": True,
+                        "branch_created": True,
+                        "commit_hash": None,
+                        "files_created": 0,
+                        "message": f"Rama {branch_name} creada y subida sin archivos"
+                    }
+                finally:
+                    os.chdir(original_cwd)
+            
             # Cambiar al directorio del repositorio
             original_cwd = os.getcwd()
             os.chdir(repo_path)
             
             try:
-                # 1. Crear y cambiar a la nueva rama
-                subprocess.run(['git', 'checkout', '-b', branch_name], check=True, capture_output=True)
-                logger.info(f"Rama {branch_name} creada en {repo_path}")
+                # 0. Hacer pull para asegurar que tenemos la versión más reciente
+                logger.info(f"Haciendo pull del repositorio {repo_path}")
+                subprocess.run(['git', 'pull', 'origin', 'main'], check=True, capture_output=True)
+                logger.info(f"Pull completado en {repo_path}")
+                
+                # 1. Crear la rama (ya sabemos que es única)
+                subprocess.run(['git', 'checkout', '-b', unique_branch_name], check=True, capture_output=True)
+                logger.info(f"Rama {unique_branch_name} creada en {repo_path}")
                 
                 # 2. Crear directorios necesarios y escribir archivos
                 for file_path, content in files.items():
@@ -361,7 +599,7 @@ IMPORTANTE:
                 ).stdout.strip()
                 
                 # 5. Push de la rama
-                subprocess.run(['git', 'push', '-u', 'origin', branch_name], check=True, capture_output=True)
+                subprocess.run(['git', 'push', '-u', 'origin', unique_branch_name], check=True, capture_output=True)
                 
                 logger.info(f"Commit realizado: {commit_hash}")
                 
