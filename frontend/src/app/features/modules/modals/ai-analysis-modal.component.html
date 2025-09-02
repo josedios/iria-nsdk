@@ -1,0 +1,293 @@
+<div class="ai-analysis-modal">
+  <div class="modal-header">
+    <div>
+      <h2>Análisis IA - {{ data.node.name }}</h2>
+      <div class="analysis-meta">
+        <mat-chip [color]="getComplexityColor(data.analysis.complexity)">{{ getComplexityLabel(data.analysis.complexity) }}</mat-chip>
+        <span class="estimated-hours">{{ data.analysis.estimated_hours || 'N/A' }} horas estimadas</span>
+        <span class="file-type">{{ getFileTypeLabel(data.analysis.file_type) }}</span>
+      </div>
+    </div>
+    <button mat-icon-button (click)="dialogRef.close()">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+  
+  <div class="modal-content">
+    <mat-tab-group>
+      <!-- Resumen Tab -->
+      <mat-tab label="Resumen">
+        <div class="tab-content">
+          <mat-card>
+            <mat-card-header>
+              <mat-card-title>Análisis General</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <p>{{ data.analysis.analysis_summary || 'No hay resumen disponible' }}</p>
+              
+              <div class="summary-stats" *ngIf="data.analysis.frontend">
+                <div class="stat-item">
+                  <strong>Campos:</strong> {{ data.analysis.frontend.fields?.length || 0 }}
+                </div>
+                <div class="stat-item">
+                  <strong>Botones:</strong> {{ data.analysis.frontend.buttons?.length || 0 }}
+                </div>
+                <div class="stat-item">
+                  <strong>Tablas:</strong> {{ data.analysis.frontend.tables?.length || 0 }}
+                </div>
+                <div class="stat-item">
+                  <strong>Navegaciones:</strong> {{ data.analysis.frontend.navigations?.length || 0 }}
+                </div>
+                <div class="stat-item">
+                  <strong>Endpoints:</strong> {{ data.analysis.backend?.endpoints?.length || 0 }}
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="getMigrationNotes()?.length">
+            <mat-card-header>
+              <mat-card-title>Notas de Migración</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <ul>
+                <li *ngFor="let note of getMigrationNotes()">{{ note }}</li>
+              </ul>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="getPotentialIssues()?.length" class="issues-card">
+            <mat-card-header>
+              <mat-card-title>⚠️ Problemas Potenciales</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <ul>
+                <li *ngFor="let issue of getPotentialIssues()">{{ issue }}</li>
+              </ul>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+      
+      <!-- Frontend Tab -->
+      <mat-tab label="Frontend (Angular)">
+        <div class="tab-content" *ngIf="data.analysis.frontend">
+          <mat-card>
+            <mat-card-header>
+              <mat-card-title>Componente Angular</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="component-info">
+                <p><strong>Tipo:</strong> {{ data.analysis.frontend.component_type || 'N/A' }}</p>
+                <p><strong>Ruta:</strong> {{ data.analysis.frontend.routing || 'N/A' }}</p>
+                <p><strong>Flujo de Navegación:</strong> {{ data.analysis.frontend.navigation_flow || 'N/A' }}</p>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.frontend.fields?.length">
+            <mat-card-header>
+              <mat-card-title>Campos del Formulario</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="field-item" *ngFor="let field of data.analysis.frontend.fields">
+                <div class="field-header">
+                  <strong>{{ field.name }}</strong>
+                  <mat-chip [color]="field.required ? 'primary' : 'default'">
+                    {{ field.type }}
+                  </mat-chip>
+                  <mat-chip *ngIf="field.required" color="warn" class="required-chip">Requerido</mat-chip>
+                </div>
+                <p class="field-validation" *ngIf="field.validation">{{ field.validation }}</p>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.frontend.buttons?.length">
+            <mat-card-header>
+              <mat-card-title>Botones</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="button-item" *ngFor="let button of data.analysis.frontend.buttons">
+                <mat-chip [color]="getButtonColor(button.action)">{{ button.name }}</mat-chip>
+                <span>{{ button.description || button.action }}</span>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.frontend.tables?.length">
+            <mat-card-header>
+              <mat-card-title>Tablas</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="table-item" *ngFor="let table of data.analysis.frontend.tables">
+                <div class="table-header">
+                  <strong>{{ table.name }}</strong>
+                  <span>{{ table.description }}</span>
+                </div>
+                <div class="table-columns" *ngIf="table.columns?.length">
+                  <h4>Columnas:</h4>
+                  <div class="column-item" *ngFor="let column of table.columns">
+                    <strong>{{ column.name }}</strong> ({{ column.type }})
+                    <span *ngIf="column.sortable">• Ordenable</span>
+                    <span *ngIf="column.filterable">• Filtrable</span>
+                    <p *ngIf="column.description">{{ column.description }}</p>
+                  </div>
+                </div>
+                <div class="table-actions" *ngIf="table.actions?.length">
+                  <h4>Acciones:</h4>
+                  <mat-chip *ngFor="let action of table.actions" color="accent">{{ action }}</mat-chip>
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.frontend.navigations?.length">
+            <mat-card-header>
+              <mat-card-title>Navegaciones</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="navigation-item" *ngFor="let nav of data.analysis.frontend.navigations">
+                <div class="navigation-header">
+                  <strong>{{ nav.trigger }}</strong> → {{ nav.destination }}
+                </div>
+                <p *ngIf="nav.description">{{ nav.description }}</p>
+                <p *ngIf="nav.condition"><strong>Condición:</strong> {{ nav.condition }}</p>
+                <div *ngIf="nav.parameters?.length">
+                  <strong>Parámetros:</strong>
+                  <mat-chip *ngFor="let param of nav.parameters" color="primary">{{ param }}</mat-chip>
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.frontend.top_menu?.menu_items?.length">
+            <mat-card-header>
+              <mat-card-title>Menú Superior</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="menu-item" *ngFor="let menuItem of data.analysis.frontend.top_menu.menu_items">
+                <div class="menu-header">
+                  <strong>{{ menuItem.label }}</strong> ({{ menuItem.action }})
+                </div>
+                <p *ngIf="menuItem.destination">→ {{ menuItem.description }}</p>
+                <div *ngIf="menuItem.submenu?.length">
+                  <h4>Submenús:</h4>
+                  <div class="submenu-item" *ngFor="let submenu of menuItem.submenu">
+                    <strong>{{ submenu.label }}</strong> → {{ submenu.destination }}
+                  </div>
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.frontend.angular_components?.length">
+            <mat-card-header>
+              <mat-card-title>Componentes Angular Material</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="components-list">
+                <mat-chip *ngFor="let component of data.analysis.frontend.angular_components" color="accent">
+                  {{ component }}
+                </mat-chip>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="getDependencies()?.length">
+            <mat-card-header>
+              <mat-card-title>Dependencias NPM</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="dependencies-list">
+                <code *ngFor="let dep of getDependencies()">{{ dep }}</code>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+      
+      <!-- Backend Tab -->
+      <mat-tab label="Backend (Spring Boot)">
+        <div class="tab-content" *ngIf="data.analysis.backend">
+          <mat-card>
+            <mat-card-header>
+              <mat-card-title>Entidad JPA</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="entity-info">
+                <p><strong>Nombre:</strong> {{ data.analysis.backend.entity_name || 'N/A' }}</p>
+                <p><strong>Tabla BD:</strong> {{ data.analysis.backend.database_table || 'N/A' }}</p>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.backend.fields?.length">
+            <mat-card-header>
+              <mat-card-title>Campos de la Entidad</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="entity-field" *ngFor="let field of data.analysis.backend.fields">
+                <div class="field-header">
+                  <strong>{{ field.name }}</strong>
+                  <mat-chip color="primary">{{ field.java_type }}</mat-chip>
+                  <mat-chip color="default">{{ field.database_type }}</mat-chip>
+                </div>
+                <div class="annotations" *ngIf="field.jpa_annotations?.length">
+                  <code *ngFor="let annotation of field.jpa_annotations">{{ annotation }}</code>
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.backend.endpoints?.length">
+            <mat-card-header>
+              <mat-card-title>Endpoints REST</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="endpoint-item" *ngFor="let endpoint of data.analysis.backend.endpoints">
+                <div class="endpoint-header">
+                  <mat-chip [color]="getMethodColor(endpoint.method)">{{ endpoint.method }}</mat-chip>
+                  <code>{{ endpoint.path }}</code>
+                </div>
+                <p>{{ endpoint.description }}</p>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.backend.business_logic">
+            <mat-card-header>
+              <mat-card-title>Lógica de Negocio</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <p>{{ data.analysis.backend.business_logic }}</p>
+            </mat-card-content>
+          </mat-card>
+
+          <mat-card *ngIf="data.analysis.backend.spring_annotations?.length">
+            <mat-card-header>
+              <mat-card-title>Anotaciones Spring</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="annotations-list">
+                <code *ngFor="let annotation of data.analysis.backend.spring_annotations">{{ annotation }}</code>
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </div>
+  
+  <div class="modal-actions">
+    <button mat-raised-button color="primary" (click)="generateCode()">
+      <mat-icon>code</mat-icon>
+      Generar Código
+    </button>
+    <button mat-raised-button (click)="exportAnalysis()">
+      <mat-icon>download</mat-icon>
+      Exportar Análisis
+    </button>
+    <button mat-button (click)="dialogRef.close()">Cerrar</button>
+  </div>
+</div>

@@ -1836,4 +1836,82 @@ async def update_model_to_gpt4():
         raise
     except Exception as e:
         logger.error(f"Error al actualizar modelo a GPT-4: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al actualizar modelo: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error al actualizar modelo: {str(e)}")
+
+@app.post("/repositories/{repo_name}/files/{file_id}/generate-code", tags=["Generación de Código"])
+async def generate_code_from_analysis(
+    repo_name: str,
+    file_id: str,
+    analysis_repo: NSDKFileAnalysisRepository = Depends(get_analysis_repository),
+    ai_analysis_repo = Depends(get_ai_analysis_repository),
+    db: Session = Depends(get_db)
+):
+    """Genera código fuente a partir del análisis de IA"""
+    try:
+        # Obtener análisis del archivo
+        file_analysis = analysis_repo.get_by_id(file_id)
+        if not file_analysis:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        
+        # Obtener análisis IA más reciente
+        ai_analyses = ai_analysis_repo.get_by_file_analysis_id(file_id)
+        if not ai_analyses:
+            raise HTTPException(status_code=404, detail="No hay análisis IA disponible para este archivo")
+        
+        # Obtener el análisis más reciente
+        latest_analysis = max(ai_analyses, key=lambda x: x.created_at)
+        analysis_data = latest_analysis.analysis_data
+        
+        # Obtener configuración activa para las rutas de repositorios
+        active_config = await config_repo.find_active()
+        if not active_config:
+            raise HTTPException(status_code=404, detail="No hay configuración activa")
+        
+        config_data = active_config.config_data
+        frontend_repo_path = config_data.get('frontendRepo', {}).get('url', '')
+        backend_repo_path = config_data.get('backendRepo', {}).get('url', '')
+        
+        if not frontend_repo_path or not backend_repo_path:
+            raise HTTPException(status_code=400, detail="Rutas de repositorios no configuradas")
+        
+        # Inicializar servicios necesarios
+        vectorization_use_case = VectorizationUseCase()
+        llm_service = LLMServiceImpl()
+        
+        # Inicializar LLM service con configuración activa
+        from .domain.entities.configuration import LLMConfig, LLMProvider
+        llm_config_data = config_data.get('llmConfig', {})
+        llm_config = LLMConfig(
+            provider=LLMProvider(llm_config_data.get('provider', 'openai')),
+            api_key=llm_config_data.get('apiKey'),
+            base_url=llm_config_data.get('baseUrl'),
+            model_name=llm_config_data.get('modelName', 'gpt-4'),
+            max_tokens=llm_config_data.get('maxTokens', 4096),
+            temperature=llm_config_data.get('temperature', 0.7)
+        )
+        await llm_service.initialize(llm_config)
+        
+        # Crear instancia del servicio de consulta NSDK
+        nsdk_query_service = NSDKQueryService(db)
+        
+        # Crear instancia del servicio de generación de código
+        from .application.services.code_generation_service import CodeGenerationService
+        code_generation_service = CodeGenerationService(vectorization_use_case, llm_service, nsdk_query_service)
+        
+        # Generar código
+        result = await code_generation_service.generate_code_from_analysis(
+            analysis_data=analysis_data,
+            file_name=file_analysis.file_name,
+            frontend_repo_path=frontend_repo_path,
+            backend_repo_path=backend_repo_path
+        )
+        
+        logger.info(f"Generación de código completada para {file_analysis.file_name}")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generando código para {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando código: {str(e)}") 
