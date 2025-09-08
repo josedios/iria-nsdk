@@ -16,6 +16,8 @@ import { MatSortModule } from '@angular/material/sort';
 import { MatTableModule } from '@angular/material/table';
 import { MatTabsModule } from '@angular/material/tabs';
 import { ConfigService, Configuration } from '../config/config.service';
+import { DocumentSelectorComponent } from './document-selector.component';
+import { DocumentUploadComponent } from './document-upload.component';
 import { KnowledgeService, SearchCodeRequest, VectorizationBatch, VectorizationStats, VectorizeRepositoryRequest } from './knowledge.service';
 
 // Interfaces locales para el componente
@@ -441,7 +443,7 @@ export class KnowledgeComponent implements OnInit {
           };
 
           this.knowledgeService.vectorizeRepository(vectorizeRequest).subscribe({
-            next: (response) => {
+            next: (response: any) => {
               console.log(`Vectorización iniciada para ${repoName}:`, response);
 
               // Monitorear progreso específico de este repositorio
@@ -451,13 +453,13 @@ export class KnowledgeComponent implements OnInit {
                 resolve(response);
               }
             },
-            error: (error) => {
+            error: (error: any) => {
               console.error(`Error vectorizando ${repoName}:`, error);
               reject(error);
             }
           });
         },
-        error: (error) => {
+        error: (error: any) => {
           console.error('Error obteniendo configuraciones:', error);
           reject(new Error('Error obteniendo configuración'));
         }
@@ -512,7 +514,7 @@ export class KnowledgeComponent implements OnInit {
             reject(new Error(`Vectorización fallida para ${repoName}`));
           }
         },
-        error: (error) => {
+        error: (error: any) => {
           console.error(`DEBUG: Error obteniendo progreso de ${repoName} (${repoType}):`, error);
           reject(error);
         }
@@ -741,10 +743,10 @@ export class KnowledgeComponent implements OnInit {
     };
 
     this.knowledgeService.searchSimilarCode(searchRequest).subscribe({
-      next: (response) => {
+      next: (response: any) => {
         console.log('Resultados de búsqueda:', response);
         // Mapear resultados del backend a la interfaz local
-        this.searchResults = response.results.map(result => ({
+        this.searchResults = response.results.map((result: any) => ({
           id: result.id || '',
           content: result.metadata?.content || result.metadata?.file_path || 'Sin contenido',
           metadata: {
@@ -919,7 +921,7 @@ export class KnowledgeComponent implements OnInit {
     // Ejemplo de implementación futura:
     /*
     this.knowledgeService.getDocuments().subscribe({
-      next: (response) => {
+      next: (response: any) => {
         this.documents = response.documents.map(doc => ({
           id: doc.id,
           name: doc.name,
@@ -1016,7 +1018,45 @@ export class KnowledgeComponent implements OnInit {
 
   openDocumentUpload() {
     console.log('Opening document upload dialog');
-    // Implementar modal de subida de documentos
+    // Abrir modal de subida de documentos
+    const dialogRef = this.dialog.open(DocumentUploadComponent, {
+      width: '600px',
+      data: {}
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        console.log('Document uploaded:', result);
+        this.snackBar.open('Documento procesado exitosamente', 'Cerrar', {
+          duration: 3000,
+          panelClass: ['success-snackbar']
+        });
+        // Refrescar datos
+        this.refreshAllData();
+      }
+    });
+  }
+
+  openDocumentSelector() {
+    console.log('Opening document selector dialog');
+    // Abrir modal de selección de documentos
+    const dialogRef = this.dialog.open(DocumentSelectorComponent, {
+      width: '90%',
+      maxWidth: '1200px',
+      data: {}
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        console.log('Document processed:', result);
+        this.snackBar.open('Documento procesado exitosamente', 'Cerrar', {
+          duration: 3000,
+          panelClass: ['success-snackbar']
+        });
+        // Refrescar datos
+        this.refreshAllData();
+      }
+    });
   }
 
   reindexDocument(doc: DocumentInfo) {

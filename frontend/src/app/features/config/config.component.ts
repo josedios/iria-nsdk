@@ -43,7 +43,12 @@ export class ConfigComponent implements OnInit {
   configs: Configuration[] = [];
   selectedConfigId: string | null = null;
 
-  availableModels: { label: string, value: string }[] = [];
+  availableModels: { label: string, value: string }[] = [
+    { label: 'GPT-5', value: 'gpt-5' },
+    { label: 'GPT-4', value: 'gpt-4' },
+    { label: 'GPT-4 Turbo', value: 'gpt-4-turbo-preview' },
+    { label: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' }
+  ];
   showApiKey = true;
   showBaseUrl = false;
   apiKeyPlaceholder = 'sk-...';
@@ -62,7 +67,11 @@ export class ConfigComponent implements OnInit {
   }
 
   ngOnInit() {
+    console.log('ConfigComponent ngOnInit - availableModels:', this.availableModels);
     this.loadConfigurations();
+    // Inicializar modelos por defecto para OpenAI
+    this.onProviderChange('openai');
+    console.log('After onProviderChange - availableModels:', this.availableModels);
   }
 
   createForm(): FormGroup {
@@ -92,9 +101,9 @@ export class ConfigComponent implements OnInit {
         provider: ['openai'],                  // ❌ Opcional - puede configurarse después
         apiKey: [''],
         baseUrl: [''],
-        modelName: ['gpt-4'],
+        modelName: ['gpt-5'],
         temperature: [0.7, [Validators.min(0), Validators.max(2)]],
-        maxTokens: [4096, [Validators.min(1), Validators.max(8192)]]
+        maxTokens: [16384, [Validators.min(1), Validators.max(32768)]]
       }),
       vectorStoreConfig: this.fb.group({
         type: ['faiss'],                       // ❌ Opcional - puede configurarse después
@@ -189,16 +198,19 @@ export class ConfigComponent implements OnInit {
   }
 
   onProviderChange(provider: string) {
+    console.log('Provider changed to:', provider);
     this.showApiKey = provider !== 'ollama';
     this.showBaseUrl = provider === 'ollama';
 
     switch (provider) {
       case 'openai':
         this.availableModels = [
+          { label: 'GPT-5', value: 'gpt-5' },
           { label: 'GPT-4', value: 'gpt-4' },
           { label: 'GPT-4 Turbo', value: 'gpt-4-turbo-preview' },
           { label: 'GPT-3.5 Turbo', value: 'gpt-3.5-turbo' }
         ];
+        console.log('Available models for OpenAI:', this.availableModels);
         this.apiKeyPlaceholder = 'sk-...';
         break;
 

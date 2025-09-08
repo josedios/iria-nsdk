@@ -22,15 +22,15 @@
         <mat-icon matListItemIcon>folder</mat-icon>
         <span matListItemTitle *ngIf="!sidebarCollapsed">Módulos</span>
       </mat-list-item>
+
+      <mat-list-item routerLink="/knowledge" routerLinkActive="active" data-tooltip="Conocimiento">
+        <mat-icon matListItemIcon>library_books</mat-icon>
+        <span matListItemTitle *ngIf="!sidebarCollapsed">Conocimiento</span>
+      </mat-list-item>
       
       <mat-list-item routerLink="/config" routerLinkActive="active" data-tooltip="Configuración">
         <mat-icon matListItemIcon>settings</mat-icon>
         <span matListItemTitle *ngIf="!sidebarCollapsed">Configuración</span>
-      </mat-list-item>
-      
-      <mat-list-item routerLink="/knowledge" routerLinkActive="active" data-tooltip="Conocimiento">
-        <mat-icon matListItemIcon>library_books</mat-icon>
-        <span matListItemTitle *ngIf="!sidebarCollapsed">Conocimiento</span>
       </mat-list-item>
       
       <mat-divider *ngIf="!sidebarCollapsed"></mat-divider>

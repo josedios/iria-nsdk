@@ -92,8 +92,9 @@
                     <mat-icon>visibility</mat-icon>
                   </button>
                   <button mat-icon-button [matTooltip]="'Generar código'" (click)="generateCode(node)"
-                    [disabled]="node.status !== 'analyzed'" *ngIf="isScrFile(node)">
-                    <mat-icon>code</mat-icon>
+                    [disabled]="node.status !== 'analyzed' && node.status !== 'generating'" *ngIf="isScrFile(node)">
+                    <mat-icon *ngIf="node.status !== 'generating'">code</mat-icon>
+                    <mat-spinner *ngIf="node.status === 'generating'" diameter="20"></mat-spinner>
                   </button>
 
                   <!-- Botón Ver Código para TODOS los ficheros -->
@@ -153,8 +154,9 @@
                     <mat-icon>visibility</mat-icon>
                   </button>
                   <button mat-icon-button [matTooltip]="'Generar código'" (click)="generateCode(node)"
-                    [disabled]="node.status !== 'analyzed'" *ngIf="isScrFile(node)">
-                    <mat-icon>code</mat-icon>
+                    [disabled]="node.status !== 'analyzed' && node.status !== 'generating'" *ngIf="isScrFile(node)">
+                    <mat-icon *ngIf="node.status !== 'generating'">code</mat-icon>
+                    <mat-spinner *ngIf="node.status === 'generating'" diameter="20"></mat-spinner>
                   </button>
 
                   <!-- Botón Ver Código para TODOS los ficheros -->
